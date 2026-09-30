@@ -48,7 +48,7 @@ ctl ──payload 0x3009（分块）──▶ c2server（透明转发）──�
 ## 4. Git 提交历史（本仓库，均可回退）
 
 ```
-<待提交> docs: 同步 protocol §10 / DESIGN 验证记录 / PROGRESS / README
+907d636 feat: viewer 远程查看器 + ctl_client 插件/wait 参数 + 文档同步
 66f5d66 feat: 协议扩展(0x1001 截屏/0x3009 payload) + Agent 实现 + ratctl 命令补全
 27e49f4 chore: 初始化仓库（VS 专用 .gitignore，仅托管源码与文档）
 ```
