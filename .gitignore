@@ -1,0 +1,104 @@
+# ============================================================
+#  C2 项目 .gitignore（Visual Studio + CMake + Go 混合工程）
+#  规则：只托管源码与文档，不托管 IDE 状态、构建产物、运行时状态
+# ============================================================
+
+# ---------- Visual Studio：IDE 状态与用户文件 ----------
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.slnx.docstates
+*.VC.VC.opendb
+*.VC.db
+*.opendb
+*.aps
+*.ncb
+*.sdf
+*.opensdf
+*.cachefile
+*.psess
+*.vsp
+*.vspx
+*.psess
+*.log
+
+# ---------- Visual Studio：构建中间产物 ----------
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+ARM/
+ARM64/
+ipch/
+*.opensdf
+*.idb
+*.iobj
+*.ipdb
+*.ilk
+*.pdb
+*.pgc
+*.pgd
+*.pgopti.*
+*.obj
+*.o
+*.exe
+*.dll
+*.lib
+*.exp
+*.tlog
+*.lastbuildstate
+*.recipe
+*.Build.CppClean.log
+*.FileListAbsolute.txt
+*.pch
+*.res
+*.dmp
+*.sbr
+*.bsc
+vcpkg.applocal.log
+
+# ---------- CMake ----------
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+CTestTestfile.cmake
+install_manifest.txt
+compile_commands.json
+build/
+out/
+_deps/
+
+# ---------- Go ----------
+bin/
+*.test
+*.out
+vendor/
+
+# ---------- im_ctl 第三方依赖（各自为独立仓库，单独获取） ----------
+im_ctl/external/
+
+# ---------- 运行时状态 / 本地配置（每台机器不同） ----------
+*.log
+imgui.ini
+ctl_window.ini
+agent.id
+client/agent.id
+
+# ---------- 编辑器 / 系统 ----------
+.idea/
+*.swp
+*~
+Thumbs.db
+desktop.ini
+
+# ---------- 备份与临时脚本 ----------
+backups/
+*.bak
+*.tmp
+*.orig
+*.rej
