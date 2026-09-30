@@ -321,7 +321,7 @@ namespace ctl
         return true;
     }
 
-    bool CtlClient::business(uint16_t cmd, const std::string &agentId,
+    bool CtlClient::business(uint8_t plugin, uint16_t cmd, const std::string &agentId,
                              const std::vector<uint8_t> &args,
                              std::string &result, std::string &err,
                              int timeoutMs)
@@ -336,7 +336,7 @@ namespace ctl
         payload.insert(payload.end(), args.begin(), args.end());
         uint8_t status = 0;
         std::vector<uint8_t> body;
-        if (!sendAndWait(cmd, c2::kPluginSys, payload, c2::kCmdResult,
+        if (!sendAndWait(cmd, plugin, payload, c2::kCmdResult,
                          status, body, err, timeoutMs))
             return false;
         if (body.size() < 5)
@@ -355,36 +355,49 @@ namespace ctl
 
     bool CtlClient::sysinfo(const std::string &agentId, std::string &result, std::string &err)
     {
-        return business(c2::kCmdSysInfo, agentId, {}, result, err);
+        return business(c2::kPluginSys, c2::kCmdSysInfo, agentId, {}, result, err);
     }
 
     bool CtlClient::exec(const std::string &agentId, const std::string &command,
                          std::string &result, std::string &err)
     {
         std::vector<uint8_t> args(command.begin(), command.end());
-        return business(c2::kCmdExecPs, agentId, args, result, err);
+        return business(c2::kPluginSys, c2::kCmdExecPs, agentId, args, result, err);
     }
 
     bool CtlClient::screenStream(const std::string &agentId, uint8_t control,
                                  uint8_t fps, uint8_t quality, uint8_t scalePercent,
-                                 std::string &err)
+                                 std::string &err, bool wait)
     {
-        std::vector<uint8_t> agentID;
-        if (!hex_decode(agentId, agentID) || agentID.size() != 16)
+        std::vector<uint8_t> args;
+        args.push_back(control);
+        args.push_back(fps);
+        args.push_back(quality);
+        args.push_back(scalePercent > 0 ? scalePercent : 100);
+
+        if (!wait)
         {
-            err = "bad agent id";
-            return false;
+            // 只发送不等回执（viewer：启动/停止都不能阻塞，否则退出时来不及发 stop）
+            std::vector<uint8_t> agentID;
+            if (!hex_decode(agentId, agentID) || agentID.size() != 16)
+            {
+                err = "bad agent id";
+                return false;
+            }
+            std::vector<uint8_t> payload = agentID;
+            payload.insert(payload.end(), args.begin(), args.end());
+            uint32_t seq = seq_.fetch_add(1) + 1;
+            if (!sendRaw(c2::kCmdScreenStream, c2::kPluginRemote, payload, seq))
+            {
+                err = "send screen stream failed";
+                return false;
+            }
+            return true;
         }
-        std::vector<uint8_t> payload = agentID;
-        payload.push_back(control);
-        payload.push_back(fps);
-        payload.push_back(quality);
-        payload.push_back(scalePercent > 0 ? scalePercent : 100);
+
         std::string result;
-        // start/stop 应秒级完成；短超时避免配对异常时卡住命令执行器 240s
-        // beacon的原因，命令同步会有高延迟，需要耐心等待
-        return business(c2::kCmdScreenStream, agentId,
-                        std::vector<uint8_t>(payload.begin() + 16, payload.end()),
+        // start/stop 应秒级完成；beacon 原因同步会有高延迟，需要耐心等待
+        return business(c2::kPluginRemote, c2::kCmdScreenStream, agentId, args,
                         result, err, 240000);
     }
 

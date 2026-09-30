@@ -54,9 +54,10 @@ public:
     bool sysinfo(const std::string& agentId, std::string& result, std::string& err);
     bool exec(const std::string& agentId, const std::string& command,
               std::string& result, std::string& err);
+    // 屏幕流控制（0x1002）：wait=true 等待 Agent 回执；false 只发送（viewer 用，避免阻塞启动）
     bool screenStream(const std::string& agentId, uint8_t control,
                       uint8_t fps, uint8_t quality, uint8_t scalePercent,
-                      std::string& err);
+                      std::string& err, bool wait = true);
 
     // 发送输入事件（协议 §9.3）：payload = agent_id(16) + count + InputEvent[]
     bool sendInputEvents(const std::string& agentId,
@@ -71,7 +72,7 @@ private:
     bool handshake(std::string& err);
     bool sendRaw(uint16_t cmd, uint8_t plugin, const std::vector<uint8_t>& payload,
                  uint32_t seq);
-    bool business(uint16_t cmd, const std::string& agentId,
+    bool business(uint8_t plugin, uint16_t cmd, const std::string& agentId,
                   const std::vector<uint8_t>& args,
                   std::string& result, std::string& err,
                   int timeoutMs = 240000);
