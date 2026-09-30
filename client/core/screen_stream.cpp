@@ -242,6 +242,12 @@ unsigned __stdcall stream_proc(void* param) {
 
 }  // namespace
 
+// 对外暴露的 JPEG 编码（截屏指令 0x1001 复用屏幕流的同一编码实现）
+bool jpeg_encode_bgra(int w, int h, int stride, const uint8_t* px, int quality,
+                      std::vector<uint8_t>& out) {
+    return encode_jpeg_bgra(w, h, stride, px, quality, out);
+}
+
 void screen_stream_set_config(const std::string& host, const AgentConfig& cfg) {
     g_host = host;
     g_cfg = cfg;

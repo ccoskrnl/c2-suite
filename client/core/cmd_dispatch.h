@@ -17,4 +17,11 @@ bool handle_command(uint16_t cmd, const uint8_t* payload, size_t len,
 std::string collect_sysinfo();                                  // SYS_INFO
 std::string exec_powershell(const std::string& command, uint8_t& status);  // EXEC_PS
 
+// 指令码分发表（payload 已由 C2 剥离 16B agent_id 前缀）：
+//   kCmdSysInfo      0x3001  系统信息（文本）
+//   kCmdExecPs       0x3008  PowerShell 执行（文本）
+//   kCmdPayload      0x3009  payload 分块上传 → %TEMP%\c2_payload\ → 末块执行（协议 §10）
+//   kCmdScreenshot   0x1001  单帧截屏（响应为 JPEG 原始字节）
+//   kCmdScreenStream 0x1002  屏幕流开关
+
 }  // namespace c2

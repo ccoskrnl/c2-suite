@@ -52,11 +52,21 @@ const (
 const (
 	CmdSysInfo uint16 = 0x3001 // 收集系统信息（plugin=PluginSys）
 	CmdExecPs  uint16 = 0x3008 // 执行 PowerShell 命令（plugin=PluginSys）
+	CmdPayload uint16 = 0x3009 // payload 分块上传并执行（plugin=PluginSys，协议 §10）
 )
 
 // 业务指令码（远程控制段 0x1xxx，plugin=PluginRemote）
 const (
+	CmdScreenshot   uint16 = 0x1001 // 单帧截屏（响应：JPEG 原始字节）
 	CmdScreenStream uint16 = 0x1002 // 屏幕流控制（beacon 信道：agent_id + 控制/fps/quality）
+)
+
+// payload 分块上传参数（协议 §10，两端契约）
+const (
+	PayloadChunkSize = 256 * 1024      // 单块数据上限 256 KiB
+	PayloadMaxTotal  = 64 * 1024 * 1024 // 落盘总大小上限 64 MiB
+	PayloadMaxNameLen = 128
+	PayloadFlagLast   = 0x01
 )
 
 // 屏幕流长连接段（0x5xxx，走专用 TCP 长连接 4445，不经 beacon）

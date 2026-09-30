@@ -456,6 +456,10 @@ func cmdTag(cmd uint16) string {
 		return "(SYS_INFO)"
 	case protocol.CmdExecPs:
 		return "(EXEC_PS)"
+	case protocol.CmdPayload:
+		return "(PAYLOAD)"
+	case protocol.CmdScreenshot:
+		return "(SCREENSHOT)"
 	case protocol.CmdScreenStream:
 		return "(SCREEN_STREAM)"
 	case protocol.CmdStreamHello:

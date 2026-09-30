@@ -78,6 +78,10 @@ bin/
 *.test
 *.out
 vendor/
+.gocache/
+
+# ---------- 工作区内的独立构建输出（沙箱/CI 用，避开 VS 既有目录 ACL） ----------
+/build/
 
 # ---------- im_ctl 第三方依赖（各自为独立仓库，单独获取） ----------
 im_ctl/external/
