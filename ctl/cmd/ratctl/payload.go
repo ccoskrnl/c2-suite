@@ -73,12 +73,17 @@ func (st *shellState) cmdPayload(rest string) {
 		fmt.Printf("[!] remote name 长度非法（1-%d）\n", protocol.PayloadMaxNameLen)
 		return
 	}
+	// 协议 §10.1 用 u16 表达 args_len：超长会被截断导致 Agent 错位解析
+	if len(execArgs) > 65535 {
+		fmt.Println("[!] --args 过长（上限 65535 字节）")
+		return
+	}
 	if len(data) > protocol.PayloadMaxTotal {
 		fmt.Printf("[!] payload 超过上限 %d 字节\n", protocol.PayloadMaxTotal)
 		return
 	}
 	total := len(data)
-	chunk := payloadChunkSize
+	chunk := protocol.PayloadChunkSize // 与 Agent 端同一契约常量（packet.go）
 	n := (total + chunk - 1) / chunk
 	if n == 0 {
 		n = 1 // 空文件也发一个末块，以便触发执行

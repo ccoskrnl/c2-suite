@@ -155,10 +155,11 @@ namespace ctl
                                 std::string &err, int timeoutMs)
     {
         uint32_t seq = seq_.fetch_add(1) + 1;
-        Pending p;
+        // shared_ptr：等待者超时返回后，读线程仍可能持有该对象（避免 use-after-free）
+        auto p = std::make_shared<Pending>();
         {
             std::lock_guard<std::mutex> lk(pendMx_);
-            pend_[seq] = &p;
+            pend_[seq] = p;
         }
         if (!sendRaw(cmd, plugin, payload, seq))
         {
@@ -167,29 +168,30 @@ namespace ctl
             err = "send failed";
             return false;
         }
-        std::unique_lock<std::mutex> lk(p.mx);
-        if (!p.cv.wait_for(lk, std::chrono::milliseconds(timeoutMs), [&]
-                           { return p.done; }))
+        std::unique_lock<std::mutex> lk(p->mx);
+        if (!p->cv.wait_for(lk, std::chrono::milliseconds(timeoutMs), [&]
+                            { return p->done; }))
         {
-            std::lock_guard<std::mutex> l2(pendMx_);
+            // 迟到响应由读线程按 seq 找到 p（shared_ptr 保证存活）；此处仅清理未消费的条目
+            std::lock_guard<std::mutex> lk2(pendMx_);
             pend_.erase(seq);
             err = "timeout waiting response";
             return false;
         }
         // 服务器同步错误：cmd=原指令码且 status!=OK
-        if (p.cmd == cmd && p.status != c2::kStatusOK)
+        if (p->cmd == cmd && p->status != c2::kStatusOK)
         {
-            status = p.status;
-            err = "server status=" + std::to_string(p.status);
+            status = p->status;
+            err = "server status=" + std::to_string(p->status);
             return false;
         }
-        if (p.cmd != wantCmd)
+        if (p->cmd != wantCmd)
         {
-            err = "unexpected response cmd=0x" + std::to_string(p.cmd);
+            err = "unexpected response cmd=0x" + std::to_string(p->cmd);
             return false;
         }
-        status = p.status;
-        body = std::move(p.body);
+        status = p->status;
+        body = std::move(p->body);
         return true;
     }
 
@@ -226,7 +228,9 @@ namespace ctl
                     w = body[4] | (body[5] << 8);
                     hh = body[6] | (body[7] << 8);
                     std::memcpy(&jl, body.data() + 8, 4);
-                    if (body.size() >= 12 + jl)
+                    // jl 来自被控端（不可信），必须用无符号回绕安全的比较：
+                    // 12 + jl 会在 32 位下回绕，导致越界读
+                    if (jl <= body.size() - 12)
                         frameCb_(fseq, w, hh, body.data() + 12, jl);
                 }
                 continue;
@@ -239,12 +243,14 @@ namespace ctl
                 lastSeq_ = h.seq;
             }
             Pending *p = nullptr;
+            std::shared_ptr<Pending> hp;  // 持有 shared_ptr，保证等待者超时后对象仍存活
             {
                 std::lock_guard<std::mutex> lk(pendMx_);
                 auto it = pend_.find(h.seq);
                 if (it != pend_.end())
                 {
-                    p = it->second;
+                    hp = it->second;
+                    p = hp.get();
                     pend_.erase(it);
                 }
             }
@@ -314,7 +320,10 @@ namespace ctl
             s.os.assign((const char *)body.data() + off, oslen);
             off += oslen;
             s.plugins = rd32();
-            s.lastSeenMs = rd32() | ((uint64_t)rd32() << 32);
+            // 注意：| 的两侧求值顺序未定义，且都会推进 off，必须拆成两条语句
+            const uint32_t seenLo = rd32();
+            const uint32_t seenHi = rd32();
+            s.lastSeenMs = (uint64_t)seenLo | ((uint64_t)seenHi << 32);
             s.online = rd8() != 0;
             out.push_back(std::move(s));
         }
@@ -444,8 +453,28 @@ namespace ctl
                 CoUninitialize();
             return false;
         }
+        // 输入来自被控端，长度与解码尺寸都要设上限，避免超大分配/崩溃
+        if (len == 0 || len > (size_t)256 * 1024 * 1024)
+        {
+            if (needUninit)
+                CoUninitialize();
+            return false;
+        }
         HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, len);
+        if (!hg)
+        {
+            if (needUninit)
+                CoUninitialize();
+            return false;
+        }
         void *p = GlobalLock(hg);
+        if (!p)
+        {
+            GlobalFree(hg);
+            if (needUninit)
+                CoUninitialize();
+            return false;
+        }
         std::memcpy(p, jpeg, len);
         GlobalUnlock(hg);
         ComPtr<IStream> stream;
@@ -469,6 +498,13 @@ namespace ctl
         }
         UINT fw = 0, fh = 0;
         frame->GetSize(&fw, &fh);
+        // 尺寸上限（1 亿像素）与 0 值校验：防止 (fw*fh*4) 回绕或超大分配抛异常
+        if (fw == 0 || fh == 0 || (uint64_t)fw * (uint64_t)fh > 100000000ULL)
+        {
+            if (needUninit)
+                CoUninitialize();
+            return false;
+        }
         w = (int)fw;
         h = (int)fh;
         // 转成 32bppBGRA

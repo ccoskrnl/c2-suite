@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -87,7 +88,7 @@ private:
     std::mutex seqMx_;
     uint32_t lastSeq_ = 0;
 
-    // 待响应（seq -> 结果）
+    // 待响应（seq -> 结果）；shared_ptr：读线程与等待者可并存，避免超时-迟到响应竞争下的悬垂
     struct Pending {
         std::mutex mx;
         std::condition_variable cv;
@@ -97,7 +98,7 @@ private:
         std::vector<uint8_t> body;
     };
     std::mutex pendMx_;
-    std::map<uint32_t, Pending*> pend_;
+    std::map<uint32_t, std::shared_ptr<Pending>> pend_;
 
     std::mutex sendMx_;  // 串行化所有 send（命令线程 + UI 发送线程并发写安全）
 

@@ -110,3 +110,38 @@ screenshot [id] <file> / screen [id] [fps] [quality] [scale] / stop / payload <f
   新代码已按规范填正确 plugin（system=3 / remote=1），后续插件化时不要依赖旧行为
 - `im_ctl/external/imgui`、`im_ctl/external/glfw`、`im_ctl/external/glad` 是**第三方目录**
   （imgui 内含独立 .git），已在 .gitignore 中整体忽略，clone 后需单独获取
+
+## 8. 交付前只读 review 结论（子代理静态审查）
+
+### 8.1 本轮已修复
+
+| 级别 | 位置 | 问题 | 修复 |
+|---|---|---|---|
+| 高 | `im_ctl/ctl_client.cpp` 帧分发 | `body.size() >= 12 + jl` 在 32 位回绕 → 越界读，可达 `memcpy(NULL, jpeg, 4GiB)` 崩溃（帧内 jpeg_len 由被控端提供，C2 不校验） | 改为 `jl <= body.size() - 12` |
+| 高 | `im_ctl/ctl_client.h/.cpp` 待响应表 | `Pending` 为栈对象、map 存裸指针；超时返回与迟到响应竞争 → use-after-free | 改为 `std::shared_ptr<Pending>` |
+| 中 | `viewer/main.cpp` 输入 | 钩子给桌面坐标，图像矩形是客户区坐标，缺 `ScreenToClient` → 鼠标坐标整体偏移 | flush 前 `ScreenToClient` |
+| 中 | `ctl/cmd/ratctl/viewer_launch.go` | 候选路径与 CMake 实际输出（`<build>/bin/viewer.exe`）不匹配 | 补 `viewer/build/bin`、`build/viewer/bin` 等候选 |
+| 低 | `im_ctl/ctl_client.cpp` listSessions | `rd32() \| ((uint64_t)rd32()<<32)` 未定序 UB（且都改 `off`）→ last_seen 错值 | 拆成两条语句 |
+| 低 | `im_ctl/ctl_client.cpp` JPEG 解码 | `GlobalAlloc/GlobalLock` 未判空、解码尺寸未校验 → OOM/超大图崩溃 | 判空 + 1 亿像素上限 + 输入长度上限 |
+| 低 | `client/core/cmd_dispatch.cpp` | 错误码在 `CloseHandle` 之后取；`SetFilePointerEx` 未检查 | 取码前移 + 检查返回值 |
+| 低 | `ctl/cmd/ratctl/payload.go` / `main.go` | `--args` 超 64KiB 会被 u16 截断；分块常量与 packet.go 重复 | 增加长度校验；改用 `protocol.PayloadChunkSize` |
+| 低 | `viewer/main.cpp` | `g_startupDone` 只写不读、`g_frameCount` 非原子；关窗早于启动线程发流会漏停 | 删除残留标志、改 `std::atomic`、先 `join` 再决定是否发停止 |
+| 低 | `docs/protocol.md` §3.3 | 文档写 0x4002/0x4003 payload 为 16B agent_id，实际是 32B hex 字符串 | 更正文档 |
+
+### 8.2 已确认但**本轮未改**（需你决定是否纳入下一步）
+
+均属**既有实现**（本次未引入），且修复面较大或有回归风险：
+
+1. `im_ctl/ctl_client.cpp`：seq 在发送锁外分配 → 并发发送可能被 C2 防重放丢弃；
+   读线程 `h.seq <= lastSeq_` 单调闸门会永久吞掉乱序响应（viewer 的实际调用序列触发不到）
+2. `client/core/screen_stream.cpp`：`fps/quality` 形参未使用（帧间隔硬编码 25fps、质量硬编码 70，
+   `encode_jpeg_bgra` 从不设置 WIC 质量属性 → 截屏 0x1001 的 75 也无效），**只有 scale 生效**
+3. `client/core/screen_stream.cpp`：先置 `g_running=true` 再建线程（失败则永久"已在运行"）；
+   线程自行退出时不清标志（4445 断开后需先 stop 才能重启）；stop 等 5s 超时后仍关句柄，
+   旧线程可能存活 → 再 start 会并存两条流线程
+4. `client/core/net.cpp` + `screen_stream.cpp`：50ms 轮询收包超时**不保留已读部分**，
+   极端延迟下会吞掉半个包导致流错位（输入事件静默丢失）
+5. `client/core/cmd_dispatch.cpp` + beacon/长连接：未知指令两信道行为不一致
+   （长连接不回包 → ctl 空等 240s；beacon 回 status=1）
+6. `server/cmd/c2server/main.go`：HELLO_ACK 的 `server_time` 用 BigEndian，与"统一小端"文档冲突
+   （当前无解析方，无功能影响）

@@ -46,7 +46,6 @@ int g_scale = 100;
 
 HWND g_hwnd = nullptr;
 std::atomic<bool> g_streamOn{false};
-std::atomic<bool> g_startupDone{false};
 
 std::mutex g_statusMx;
 std::string g_status = "connecting...";
@@ -56,7 +55,7 @@ std::mutex g_frameMx;
 std::vector<uint8_t> g_frameBgra;
 int g_frameW = 0;
 int g_frameH = 0;
-unsigned long long g_frameCount = 0;
+std::atomic<unsigned long long> g_frameCount{0};
 
 std::wstring to_wide(const std::string& s) {
     if (s.empty())
@@ -93,11 +92,10 @@ void on_frame(uint32_t seq, int w, int h, const uint8_t* jpeg, size_t len) {
         g_frameBgra.swap(bgra);
         g_frameW = dw;
         g_frameH = dh;
-        g_frameCount++;
     }
-    if ((g_frameCount % 25) == 1)
-        std::printf("[*] frame #%llu (%dx%d, %zu jpeg bytes)\n",
-                    g_frameCount, dw, dh, len);
+    const unsigned long long n = g_frameCount.fetch_add(1) + 1;
+    if ((n % 25) == 1)
+        std::printf("[*] frame #%llu (%dx%d, %zu jpeg bytes)\n", n, dw, dh, len);
     if (g_hwnd)
         PostMessageW(g_hwnd, kMsgFrame, 0, 0);
 }
@@ -127,8 +125,12 @@ void flush_input() {
     for (auto& ev : batch) {
         bool isMouse = (ev.msg >= WM_MOUSEFIRST && ev.msg <= WM_MOUSELAST);
         if (isMouse) {
+            // 钩子给的是桌面物理坐标，而图像矩形在客户区坐标系 → 先转换
+            POINT pt{ (LONG)ev.x, (LONG)ev.y };
+            if (!g_hwnd || !ScreenToClient(g_hwnd, &pt))
+                continue;
             int rx = 0, ry = 0;
-            if (!viewer::map_to_remote(ev.x, ev.y, rx, ry))
+            if (!viewer::map_to_remote(pt.x, pt.y, rx, ry))
                 continue;  // 图像区域外：丢弃（避免误操作远端其他区域）
             ev.x = rx;
             ev.y = ry;
@@ -147,7 +149,7 @@ void update_title() {
     std::string st = get_status();
     if (g_streamOn.load()) {
         char buf[128];
-        std::snprintf(buf, sizeof(buf), "streaming (%llu frames)", g_frameCount);
+        std::snprintf(buf, sizeof(buf), "streaming (%llu frames)", g_frameCount.load());
         st = buf;
     }
     std::wstring title = L"RatViewer [" + to_wide(g_agentId.substr(0, 8)) + L"] - " + to_wide(st);
@@ -247,7 +249,6 @@ void startup_thread() {
     if (!g_client.connect(host, port, err)) {
         set_status("connect failed: " + err);
         std::printf("[!] connect failed: %s\n", err.c_str());
-        g_startupDone.store(true);
         return;
     }
     std::printf("[*] connected to %s:%u\n", host.c_str(), port);
@@ -258,14 +259,12 @@ void startup_thread() {
                                (uint8_t)g_scale, err, /*wait=*/false)) {
         set_status("stream request failed: " + err);
         std::printf("[!] stream request failed: %s\n", err.c_str());
-        g_startupDone.store(true);
         return;
     }
     g_streamOn.store(true);
     set_status("waiting for frames...");
     std::printf("[*] screen stream requested (fps=%d quality=%d scale=%d%%)\n",
                 g_fps, g_quality, g_scale);
-    g_startupDone.store(true);
 }
 
 void print_usage() {
@@ -364,6 +363,9 @@ int main(int argc, char** argv) {
     // ---- 退出清理 ----
     KillTimer(hwnd, kTimerFlush);
     viewer::uninstall_hooks();
+    // 先等启动线程收尾（它不等待回执，很快返回），再决定是否发停止请求；
+    // 否则"关窗早于启动线程发出 0x1002"会漏停（需 ratctl stop 兜底）
+    th.join();
     if (g_streamOn.load()) {
         std::string err;
         g_client.screenStream(g_agentId, 0, (uint8_t)g_fps, (uint8_t)g_quality,
@@ -373,8 +375,7 @@ int main(int argc, char** argv) {
         std::printf("[*] 屏幕流未启动，跳过停止请求（可用 ratctl stop 兜底）\n");
     }
     g_streamOn.store(false);
-    th.join();
     g_client.disconnect();
-    std::printf("[*] viewer exit (frames=%llu)\n", g_frameCount);
+    std::printf("[*] viewer exit (frames=%llu)\n", g_frameCount.load());
     return 0;
 }

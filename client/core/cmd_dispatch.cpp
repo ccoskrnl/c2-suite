@@ -437,10 +437,17 @@ namespace c2
         }
         LARGE_INTEGER li;
         li.QuadPart = (LONGLONG)offset;
-        SetFilePointerEx(f, li, nullptr, FILE_BEGIN);
+        if (!SetFilePointerEx(f, li, nullptr, FILE_BEGIN))
+        {
+            const DWORD serr = GetLastError();
+            CloseHandle(f);
+            status = kStatusPluginErrBase;
+            return "seek payload failed (err=" + std::to_string(serr) + ")";
+        }
         DWORD written = 0;
         BOOL wok = (data_len == 0) ? TRUE
             : WriteFile(f, payload + off, data_len, &written, nullptr);
+        const DWORD werr = wok ? 0 : GetLastError();  // 必须在 CloseHandle 之前取
         LARGE_INTEGER total;
         total.QuadPart = 0;
         GetFileSizeEx(f, &total);
@@ -448,7 +455,7 @@ namespace c2
         if (!wok || written != data_len)
         {
             status = kStatusPluginErrBase;
-            return "write payload failed (err=" + std::to_string(GetLastError()) + ")";
+            return "write payload failed (err=" + std::to_string(werr) + ")";
         }
         if (total.QuadPart > (LONGLONG)kPayloadMaxTotal)
         {

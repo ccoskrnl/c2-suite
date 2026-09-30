@@ -32,14 +32,19 @@ func findViewer() (string, error) {
 		cands = append(cands,
 			filepath.Join(dir, "viewer.exe"),
 			filepath.Join(dir, "..", "viewer", "viewer.exe"),
+			// cmake -S viewer -B viewer/build   →  viewer/build/bin/viewer.exe
+			filepath.Join(dir, "..", "..", "viewer", "build", "bin", "viewer.exe"),
 			filepath.Join(dir, "..", "..", "viewer", "build", "viewer.exe"),
+			// cmake -S viewer -B build/viewer   →  build/viewer/bin/viewer.exe
 			filepath.Join(dir, "..", "..", "build", "viewer", "bin", "viewer.exe"),
+			filepath.Join(dir, "..", "..", "build", "viewer", "Debug", "viewer.exe"),
 		)
 	}
 	cands = append(cands,
+		filepath.Join("viewer", "build", "bin", "viewer.exe"),
 		filepath.Join("viewer", "build", "viewer.exe"),
 		filepath.Join("build", "viewer", "bin", "viewer.exe"),
-		filepath.Join("build", "viewer", "bin", "Debug", "viewer.exe"),
+		filepath.Join("build", "viewer", "Debug", "viewer.exe"),
 	)
 	for _, c := range cands {
 		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {

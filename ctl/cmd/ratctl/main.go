@@ -36,8 +36,6 @@ const (
 	helloVersion = uint32(1<<16 | 1)
 	// 结果等待超时：beacon 轮询下要等 sleeptime(60s) + 执行(120s) + 余量
 	waitTimeout = 240 * time.Second
-	// payload 分块大小（协议 §10）
-	payloadChunkSize = 256 * 1024
 )
 
 // SessionInfo 会话表条目（协议 §5.3）。

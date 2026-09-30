@@ -128,8 +128,12 @@ typedef struct {
 | 指令码 | 名称 | 方向 | payload | 响应 |
 |---|---|---|---|---|
 | 0x4001 | CTL_LIST | CLI→C2 | 空 | 会话数组（见 §5.3） |
-| 0x4002 | CTL_KILL_SESSION | CLI→C2 | agent_id(16B) | status |
-| 0x4003 | CTL_GET_SESSION | CLI→C2 | agent_id(16B) | 单会话详情 |
+| 0x4002 | CTL_KILL_SESSION | CLI→C2 | agent_id 的 hex 字符串(32B ASCII) | status |
+| 0x4003 | CTL_GET_SESSION | CLI→C2 | agent_id 的 hex 字符串(32B ASCII) | 单会话详情 |
+
+> 注意：`0x4002/0x4003` 的 payload 是 **agent_id 的 hex 字符串（32 字节 ASCII）**，
+> 不是 16 字节二进制（C2 会话表以 hex 字符串为键）。业务指令 `0x1xxx/0x2xxx/0x3xxx`
+> 的 payload 首 16 字节才是二进制 agent_id。
 
 ---
 
