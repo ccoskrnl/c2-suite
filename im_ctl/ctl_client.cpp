@@ -132,10 +132,9 @@ namespace ctl
         return true;
     }
 
-    bool CtlClient::sendRaw(uint16_t cmd, uint8_t plugin,
-                            const std::vector<uint8_t> &payload, uint32_t seq)
+    bool CtlClient::writeLocked(uint16_t cmd, uint8_t plugin,
+                                const std::vector<uint8_t> &payload, uint32_t seq)
     {
-        std::lock_guard<std::mutex> lock(sendMx_); // 写连接串行化（多线程安全）
         std::vector<uint8_t> sealed;
         std::string err;
         if (!c2::aes_gcm_encrypt(key_.data(), key_.size(),
@@ -149,24 +148,41 @@ namespace ctl
         return c2::net_write_packet(sock_, h, sealed.data(), sealed.size());
     }
 
+    bool CtlClient::sendRaw(uint16_t cmd, uint8_t plugin,
+                            const std::vector<uint8_t> &payload, uint32_t &seqOut)
+    {
+        // seq 在发送锁内分配：并发发送时 seq 的递增顺序与字节落网顺序一致，
+        // 否则 C2 的防重放（每连接 seq 严格递增）会把后到的小 seq 包丢掉
+        std::lock_guard<std::mutex> lock(sendMx_); // 写连接串行化（多线程安全）
+        seqOut = seq_.fetch_add(1) + 1;
+        return writeLocked(cmd, plugin, payload, seqOut);
+    }
+
     bool CtlClient::sendAndWait(uint16_t cmd, uint8_t plugin,
                                 const std::vector<uint8_t> &payload, uint16_t wantCmd,
                                 uint8_t &status, std::vector<uint8_t> &body,
                                 std::string &err, int timeoutMs)
     {
-        uint32_t seq = seq_.fetch_add(1) + 1;
+        // seq 分配、pending 登记、发送在同一发送锁内完成：
+        //   - seq 与落网顺序一致（满足 C2 防重放）
+        //   - 响应到达前 pending 已登记（否则会被当"无人认领"丢弃）
         // shared_ptr：等待者超时返回后，读线程仍可能持有该对象（避免 use-after-free）
         auto p = std::make_shared<Pending>();
+        uint32_t seq = 0;
         {
-            std::lock_guard<std::mutex> lk(pendMx_);
-            pend_[seq] = p;
-        }
-        if (!sendRaw(cmd, plugin, payload, seq))
-        {
-            std::lock_guard<std::mutex> lk(pendMx_);
-            pend_.erase(seq);
-            err = "send failed";
-            return false;
+            std::lock_guard<std::mutex> lock(sendMx_);
+            seq = seq_.fetch_add(1) + 1;
+            {
+                std::lock_guard<std::mutex> lk(pendMx_);
+                pend_[seq] = p;
+            }
+            if (!writeLocked(cmd, plugin, payload, seq))
+            {
+                std::lock_guard<std::mutex> lk(pendMx_);
+                pend_.erase(seq);
+                err = "send failed";
+                return false;
+            }
         }
         std::unique_lock<std::mutex> lk(p->mx);
         if (!p->cv.wait_for(lk, std::chrono::milliseconds(timeoutMs), [&]
@@ -235,33 +251,34 @@ namespace ctl
                 }
                 continue;
             }
-            // 防重放（仅请求-响应包；帧已在上方处理并 continue）
-            {
-                std::lock_guard<std::mutex> lk(seqMx_);
-                if (h.seq <= lastSeq_)
-                    continue;
-                lastSeq_ = h.seq;
-            }
-            Pending *p = nullptr;
-            std::shared_ptr<Pending> hp;  // 持有 shared_ptr，保证等待者超时后对象仍存活
+            // 先按 seq 找等待者：命中即投递，不做单调闸门
+            // （闸门会永久吞掉"晚到的较早响应"，例如并发请求场景）
+            std::shared_ptr<Pending> hp;
             {
                 std::lock_guard<std::mutex> lk(pendMx_);
                 auto it = pend_.find(h.seq);
                 if (it != pend_.end())
                 {
                     hp = it->second;
-                    p = hp.get();
                     pend_.erase(it);
                 }
             }
-            if (p)
+            if (!hp)
             {
-                std::lock_guard<std::mutex> lk(p->mx);
-                p->cmd = h.cmd;
-                p->status = h.status;
-                p->body = std::move(body);
-                p->done = true;
-                p->cv.notify_one();
+                // 无人认领（重放/乱序/已处理/非请求响应）：按防重放闸门丢弃
+                std::lock_guard<std::mutex> lk(seqMx_);
+                if (h.seq <= lastSeq_)
+                    continue;
+                lastSeq_ = h.seq;
+                continue;
+            }
+            {
+                std::lock_guard<std::mutex> lk(hp->mx);
+                hp->cmd = h.cmd;
+                hp->status = h.status;
+                hp->body = std::move(body);
+                hp->done = true;
+                hp->cv.notify_one();
             }
         }
     }
@@ -395,7 +412,7 @@ namespace ctl
             }
             std::vector<uint8_t> payload = agentID;
             payload.insert(payload.end(), args.begin(), args.end());
-            uint32_t seq = seq_.fetch_add(1) + 1;
+            uint32_t seq = 0;
             if (!sendRaw(c2::kCmdScreenStream, c2::kPluginRemote, payload, seq))
             {
                 err = "send screen stream failed";
@@ -429,7 +446,7 @@ namespace ctl
         payload.insert(payload.end(), (const uint8_t *)events.data(),
                        (const uint8_t *)events.data() + events.size() * sizeof(c2::InputEvent));
 
-        uint32_t seq = seq_.fetch_add(1) + 1;
+        uint32_t seq = 0;
         if (!sendRaw(c2::kCmdInputEvents, c2::kPluginRemote, payload, seq))
         {
             err = "send input events failed";

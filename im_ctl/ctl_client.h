@@ -71,8 +71,12 @@ public:
 private:
     void readLoop();
     bool handshake(std::string& err);
+    // 分配 seq 并发送（在发送锁内，保证 seq 与落网顺序一致）
     bool sendRaw(uint16_t cmd, uint8_t plugin, const std::vector<uint8_t>& payload,
-                 uint32_t seq);
+                 uint32_t& seqOut);
+    // 调用方必须已持有 sendMx_（只做加密 + 写连接）
+    bool writeLocked(uint16_t cmd, uint8_t plugin, const std::vector<uint8_t>& payload,
+                     uint32_t seq);
     bool business(uint8_t plugin, uint16_t cmd, const std::string& agentId,
                   const std::vector<uint8_t>& args,
                   std::string& result, std::string& err,
