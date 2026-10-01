@@ -315,6 +315,8 @@ void run_beacon(const std::string& host, uint16_t port,
                             for (const auto& c : cmds) {
                                 uint8_t status = 0;
                                 std::vector<uint8_t> resp;
+                                // 未知指令同样回结果（status=kStatusUnknownCmd）：
+                                // 与长连接信道保持一致（见 client/core/main.cpp）
                                 handle_command(c.cmd, c.payload.data(), c.payload.size(),
                                                resp, status);
                                 printf("[beacon] exec cmd=0x%04x seq=%u status=%u len=%zu\n",

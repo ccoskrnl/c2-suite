@@ -126,9 +126,10 @@ namespace
 					std::vector<uint8_t> resp;
 					//size_t arg_off = plain.size() > c2::kAgentIdLen ? c2::kAgentIdLen : plain.size();
 					size_t arg_off = 0;
-					if (!c2::handle_command(h.cmd, plain.data() + arg_off,
-						plain.size() - arg_off, resp, status))
-						continue; // 未知指令不回
+					// 未知指令也回 CMD_RESULT（handle_command 置 status=kStatusUnknownCmd，
+					// 见协议 §2/§3.2）：与 beacon 信道行为一致，避免 ctl 空等到 240s 超时
+					c2::handle_command(h.cmd, plain.data() + arg_off,
+						plain.size() - arg_off, resp, status);
 
 					// CMD_RESULT：payload = req_seq(4) + status(1) + result
 					std::vector<uint8_t> out;
