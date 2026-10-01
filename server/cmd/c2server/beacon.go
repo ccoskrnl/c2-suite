@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -104,9 +105,14 @@ func decodeResults(b []byte) ([]BeaconResult, error) {
 		if err := binary.Read(r, binary.LittleEndian, &ln); err != nil {
 			return nil, err
 		}
-		br.Result = make([]byte, ln)
-		if _, err := r.Read(br.Result); err != nil {
-			return nil, err
+		// 注意：空结果（ln==0）不能调用 r.Read：bytes.Reader 在缓冲区末尾对零长度
+		// 读会返回 io.EOF，导致整个结果块解码失败（表现为 Agent 反复 POST failed）。
+		// 同时改用 io.ReadFull：r.Read 在载荷不足时可能短读且不报错。
+		if ln > 0 {
+			br.Result = make([]byte, ln)
+			if _, err := io.ReadFull(r, br.Result); err != nil {
+				return nil, err
+			}
 		}
 		out = append(out, br)
 	}

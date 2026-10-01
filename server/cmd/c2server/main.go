@@ -98,10 +98,11 @@ func doHandshake(conn net.Conn, h *protocol.Header, raw []byte, psk []byte) (*se
 	key := protocol.DeriveSessionKey(psk, clientNonce, serverNonce)
 
 	// HELLO_ACK（明文）：accept(1) + server_nonce(16) + server_time(8)
+	// 协议统一小端（docs/protocol.md 第 1 章）：server_time 必须小端（原为大端，无解析方故未暴露）
 	ack := make([]byte, 0, 1+protocol.ServerNonceLen+8)
 	ack = append(ack, 0) // accept=OK
 	ack = append(ack, serverNonce...)
-	ack = binary.BigEndian.AppendUint64(ack, uint64(time.Now().UnixMilli()))
+	ack = binary.LittleEndian.AppendUint64(ack, uint64(time.Now().UnixMilli()))
 	if err := protocol.WritePacket(conn, &protocol.Header{
 		Seq: h.Seq, Cmd: protocol.CmdHelloAck, Plugin: h.Plugin,
 	}, ack); err != nil {
