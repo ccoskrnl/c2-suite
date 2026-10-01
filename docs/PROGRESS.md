@@ -93,7 +93,7 @@ screenshot [id] <file> / screen [id] [fps] [quality] [scale] / stop / payload <f
    beacon 会话没有 TCP 连接；需要服务端补"标记下线并从注册表删除"
 3. **payload 落盘策略**：当前固定 `%TEMP%\c2_payload\<name>`，同名覆盖、不自动清理
 4. **e2e_m1/m2 过时**：直连模型历史脚本，可归档
-5. 正式化：PSK 外部化、屏幕流帧率/质量参数生效（当前 Agent 固定 25fps/70）、多显示器区域配置
+5. 正式化：PSK 外部化、多显示器/区域抓屏配置、屏幕流码率自适应
 
 ## 7. 已知注意点
 
@@ -104,6 +104,9 @@ screenshot [id] <file> / screen [id] [fps] [quality] [scale] / stop / payload <f
   要用长连接模式，把 `int rc = run_beacon(argc, argv);` 改成 `run_agent(host, port)`
 - **测试用后台进程**：用 `Start-Process` 或工具前台上限内启动的进程可能在命令结束时被回收；
   长跑进程用受管后台作业启动
+- **屏幕流参数已生效**：`fps/quality/scale` 全部按 0x1002 参数工作（截屏 0x1001 质量为 75）；
+  帧节奏由 `next_frame` 时间片控制，输入轮询最多占用等待下一帧的空档（≤50ms）
+- **屏幕流线程可自愈**：连接断开时线程自行退出并清标志，之后可直接再次 start（无需先 stop）
 - **viewer 强杀不停流**（不会发 control=0）→ 用 `ratctl stop` 兜底
 - **屏幕流帧的 seq 是 agent 侧递增**；ctl 端读线程对 `0x0503` 帧跳过防重放（独立 seq 空间）
 - **业务指令 plugin 字段**：C2 当前只按 cmd 段路由，plugin 不符也能工作；
@@ -113,7 +116,7 @@ screenshot [id] <file> / screen [id] [fps] [quality] [scale] / stop / payload <f
 
 ## 8. 交付前只读 review 结论（子代理静态审查）
 
-### 8.1 本轮已修复
+### 8.1 第一轮已修复
 
 | 级别 | 位置 | 问题 | 修复 |
 |---|---|---|---|
@@ -128,20 +131,30 @@ screenshot [id] <file> / screen [id] [fps] [quality] [scale] / stop / payload <f
 | 低 | `viewer/main.cpp` | `g_startupDone` 只写不读、`g_frameCount` 非原子；关窗早于启动线程发流会漏停 | 删除残留标志、改 `std::atomic`、先 `join` 再决定是否发停止 |
 | 低 | `docs/protocol.md` §3.3 | 文档写 0x4002/0x4003 payload 为 16B agent_id，实际是 32B hex 字符串 | 更正文档 |
 
-### 8.2 已确认但**本轮未改**（需你决定是否纳入下一步）
+### 8.2 第二轮修复（本次全部完成）
 
-均属**既有实现**（本次未引入），且修复面较大或有回归风险：
+第一轮 review 遗留的 6 项既有问题已全部修复，另在验证中**新发现并修复 1 项**：
 
-1. `im_ctl/ctl_client.cpp`：seq 在发送锁外分配 → 并发发送可能被 C2 防重放丢弃；
-   读线程 `h.seq <= lastSeq_` 单调闸门会永久吞掉乱序响应（viewer 的实际调用序列触发不到）
-2. `client/core/screen_stream.cpp`：`fps/quality` 形参未使用（帧间隔硬编码 25fps、质量硬编码 70，
-   `encode_jpeg_bgra` 从不设置 WIC 质量属性 → 截屏 0x1001 的 75 也无效），**只有 scale 生效**
-3. `client/core/screen_stream.cpp`：先置 `g_running=true` 再建线程（失败则永久"已在运行"）；
-   线程自行退出时不清标志（4445 断开后需先 stop 才能重启）；stop 等 5s 超时后仍关句柄，
-   旧线程可能存活 → 再 start 会并存两条流线程
-4. `client/core/net.cpp` + `screen_stream.cpp`：50ms 轮询收包超时**不保留已读部分**，
-   极端延迟下会吞掉半个包导致流错位（输入事件静默丢失）
-5. `client/core/cmd_dispatch.cpp` + beacon/长连接：未知指令两信道行为不一致
-   （长连接不回包 → ctl 空等 240s；beacon 回 status=1）
-6. `server/cmd/c2server/main.go`：HELLO_ACK 的 `server_time` 用 BigEndian，与"统一小端"文档冲突
-   （当前无解析方，无功能影响）
+| # | 位置 | 问题 | 修复 |
+|---|---|---|---|
+| 1 | `im_ctl/ctl_client.cpp` | seq 在发送锁外分配 → 并发发送时 seq 与落网顺序不一致，被 C2 防重放丢包；读线程 `h.seq <= lastSeq_` 单调闸门会永久吞掉"晚到的较早响应" | `sendRaw` 改为在发送锁内分配 seq；`sendAndWait` 的"分配 seq + 登记 pending + 发送"合并到同一锁；读线程改为**先按 seq 找等待者投递**，仅对无人认领的包走防重放闸门 |
+| 2 | `client/core/screen_stream.cpp` | `fps/quality` 形参完全不生效（帧间隔硬编码 25fps、JPEG 质量硬编码 70；`encode_jpeg_bgra` 从不设置 WIC 质量属性 → 截屏 0x1001 的 75 也无效）；输入轮询的 50ms 阻塞还挤占帧节奏 | 帧节奏改为**基于 `next_frame` 的时间片**；JPEG 质量经属性包在 `frame->Initialize` 之前写入；`fps/quality/scale` 全部生效 |
+| 3 | `client/core/screen_stream.cpp` | 先置 `g_running=true` 再建线程（失败则永久"已在运行"）；线程自行退出不清标志（断开后无法重启）；stop 等 5s 超时仍关句柄置空 → 可能并存两条流线程 | 新增 `g_thread_alive` + `ThreadGuard`（任何退出路径都清标志）；start 先占位、建线程失败回滚；stop 超时**保留句柄**，由 `reap_finished_thread()` 在线程退出后回收 |
+| 4 | `client/core/screen_stream.cpp` | 50ms 轮询直接读包，超时丢半包 → 字节流错位、输入事件静默丢失 | 新增 `InputStream`：**自持重装缓冲** + `select` 短等待，只从缓冲切完整包，半包留待下次 |
+| 5 | `client/core/main.cpp`、`beacon.cpp` | 未知指令两信道行为不一致（长连接不回包 → ctl 空等 240s 超时；beacon 回 status=1） | 长连接也回 `CMD_RESULT(status=1)`，与 beacon 及协议 §2 一致 |
+| 6 | `server/cmd/c2server/main.go` | HELLO_ACK 的 `server_time` 用 BigEndian，与"统一小端"文档冲突 | 改 LittleEndian（无解析方，行为无影响） |
+| 7 | `server/cmd/c2server/beacon.go` | **验证中新发现**：`decodeResults` 对零长度结果调用 `r.Read(空切片)`，`bytes.Reader` 在缓冲区末尾返回 `io.EOF` → 整个结果块解码失败，Agent 反复 `POST failed`（任何"status 非 0 且结果为空"的结果都会触发，未知指令即此类） | `ln > 0` 才读结果，并改用 `io.ReadFull`（避免短读静默截断） |
+
+### 8.3 第二轮验证证据（beacon agent + 临时探针，均为实测）
+
+| 项 | 证据 |
+|---|---|
+| server_time 小端 | 探针按小端解析 = 本机 `UnixMilli`，drift=0ms |
+| fps 生效 | 请求 6 / 8 / 5 → 实测 6.1 / 8.1 / 5.2 fps（修复前恒为"25fps 减去 50ms 轮询开销" ≈ 7–10） |
+| quality 生效 | 同 scale 下：quality 25 → 52.8KB、40 → 37KB、80 → 90.5KB、90 → 157.5KB |
+| scale 生效 | 50% → 1280×720、40% → 1024×576、30% → 768×432 |
+| 输入下行 + 重装缓冲 | 探针发 0x0504 → C2 `relayed input events` → Agent `injected 1 input events` |
+| 未知指令 | `0x3099` → `CMD_RESULT status=1`（不再空等；同时验证第 7 项修复） |
+| 线程自行退出后重启 | 杀掉 C2 → Agent `input channel broken` → `stopped`；重启 C2 后再 start → `screen stream started`（修复前会返回"已在运行"） |
+
+> 本轮验证用临时探针（`build/e2e/probe.go`，gitignored；验证后已移入回收站）。

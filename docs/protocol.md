@@ -122,6 +122,9 @@ typedef struct {
 >
 > 当前已实现：`SYS_INFO`、`SYS_EXEC_PS`、`SYS_PAYLOAD`（§10）、`RMT_SCREENSHOT`（截屏）、
 > `RMT_SCREEN_STREAM`（屏幕流，§9）；其余业务码 M3 插件化时启用。
+>
+> **未实现/未知指令**：Agent 一律回 `CMD_RESULT`（`status=1` 未实现/未知指令），
+> **两条信道行为一致**（beacon 与长连接都回），控制端据此立即失败而不是超时。
 
 ### 3.3 管理段（plugin=0xFF，仅 CLI↔C2，C2 本地处理不转发）
 
@@ -179,7 +182,7 @@ typedef struct {
 ```
   accept        u8    0=接受，非 0=拒绝原因
   server_nonce  bytes 16B（接受时）
-  server_time   u64   Unix ms
+  server_time   u64   Unix ms（小端；当前无解析方，仅作时钟参考）
 ```
 
 ### 5.3 CTL_LIST 响应 payload（明文）
@@ -276,7 +279,8 @@ count   u32   结果条数
 每条：
   seq     u32   对应命令的 seq
   status  u8    状态码（§2）
-  len     u32   result 字节数
+  len     u32   result 字节数（**允许为 0**：接收端不得对 0 长度调用 Read，
+                否则 bytes.Reader 在缓冲区末尾返回 io.EOF，会导致整块解码失败）
   result  bytes 结果文本
 ```
 
@@ -329,6 +333,8 @@ C2   ──CmdStreamAck (0x0502)──▶ Agent  payload: server_nonce(16)
 - **输入坐标换算基准必须同步**：注入时的像素基准 = 真实分辨率 × scale
   （`set_input_scale`），否则键鼠只能覆盖屏幕的一部分（如 scale=0.5 时只覆盖左上 1/4）；
 - ctl 侧无需缩放处理：帧头携带的 w/h 即缩放后尺寸，坐标映射（本地屏幕→帧坐标）自动适配。
+- 同一 payload 里的 `fps` 与 `quality` 也已生效：帧节奏按 `fps` 上限（`1000/fps` 时间片）执行，
+  JPEG 质量经 WIC 属性包 `ImageQuality`（0.0–1.0）设置；截屏指令 `0x1001` 的质量固定 75。
 
 ### 9.2 帧上行（Agent→C2→ctl）
 

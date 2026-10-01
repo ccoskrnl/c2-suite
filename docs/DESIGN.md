@@ -92,6 +92,10 @@
 - **数据/回显包不参与**（避免 seq 空间冲突）：
   - ctl 读线程：`SCREEN_FRAME` 先于防重放处理（帧 seq 是 Agent 侧递增，独立空间）
   - 服务器 agentLoop：`CMD_RESULT` 跳过防重放（命令 seq 回显，与心跳 seq 分属两个计数器）
+- **控制端响应投递顺序**（`im_ctl/ctl_client.cpp`，viewer 共用）：
+  - 发送侧：`seq` 在发送锁**内**分配，保证 seq 递增顺序 = 字节落网顺序（否则 C2 防重放会丢包）
+  - 接收侧：**先按 seq 查等待者并投递**，只有"无人认领"的包才走 `lastSeq` 闸门
+    （否则并发的"晚到的较早响应"会被闸门永久吞掉）
 - 历史教训：早期帧/CMD_RESULT 与请求 seq 共用窗口，导致"start 后所有命令 busy"（已修复 `149afe5`）
 
 ---
@@ -147,7 +151,7 @@
 | `session` | 握手、心跳线程（15s，seq 递增） |
 | `cmd_dispatch` | 命令分发中心：SysInfo（RtlGetVersion/GlobalMemoryStatusEx/GetDiskFreeSpaceEx）、ExecPs（CreateProcess powershell + 管道捕获 + 120s 超时）、ScreenStream 控制、Screenshot（GDI 抓帧 + WIC JPEG）、Payload（分块落盘 `%TEMP%\c2_payload\` + CreateProcess 执行） |
 | `screen_spy` | GDI 抓屏（虚拟屏幕/DPI/区域/全分辨率） |
-| `screen_stream` | 4445 连接线程：握手 → 帧循环（抓屏+WIC JPEG+加密上行，25fps）+ 输入接收（SendInput 注入）；start/stop 线程管理 |
+| `screen_stream` | 4445 连接线程：握手 → 帧循环（抓屏+WIC JPEG+加密上行，节奏由 `fps` 时间片控制、质量由 `quality` 经 WIC 属性包设置）+ 输入接收（自持重装缓冲 `InputStream` + `SendInput` 注入）；start/stop 线程状态机（`g_thread_alive` + `ThreadGuard`，可自愈重启） |
 | `input_replay`/`desktop_switch` | 注入实现（WM_* 映射、坐标换算、活动桌面切换） |
 | `beacon` | HTTP 轮询（GET 命令/POST 结果/TLV/jitter） |
 
@@ -220,7 +224,7 @@ C2: handleStreamConn 退出 → RemoveAgent
 - **机密性/完整性**：AES-256-GCM（每包随机 nonce + tag）
 - **防重放**：请求类包 seq 严格递增（帧/回显包独立空间，避免冲突）
 - **流量伪装**：beacon 信道伪装 HTML 网页、POST 伪装表单；屏幕流走独立长连接（仅激活时存在）
-- **已知简化**：PSK 编译期内置（生产外部化）；帧/质量参数固定（25fps/70）；握手不校验 PSK 一致性（不符到第一个加密包才暴露）
+- **已知简化**：PSK 编译期内置（生产外部化）；握手不校验 PSK 一致性（不符到第一个加密包才暴露）
 
 ---
 
@@ -296,5 +300,7 @@ python scripts/e2e_m3.py   # beacon 轮询 + 交互式 ratctl
   需 `ratctl stop` 兜底（正常关窗会自动停流）
 - **viewer 输入策略**：鼠标仅图像矩形内下发，键盘仅 viewer 为前台窗口时下发；
   本机注入事件被 `LL*HF_INJECTED` 过滤，不会回环
-- 正式化：PSK 外部化、帧率/质量参数生效、多显示器区域配置
+- 正式化：PSK 外部化、多显示器/区域抓屏配置、屏幕流码率自适应
+- **信道语义**：未知指令两信道一致（都回 `CMD_RESULT(status=1)`）；
+  beacon 结果块允许零长度结果（`decodeResults` 用 `io.ReadFull`，`ln==0` 不读）
 - `im_ctl/external/imgui` 为内嵌 git 仓库（gitlink），clone 需单独处理
