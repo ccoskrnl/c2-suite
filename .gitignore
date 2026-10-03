@@ -60,11 +60,20 @@ ipch/
 *.sbr
 *.bsc
 vcpkg.applocal.log
+vcpkg_installed/
+
+# VS IntelliSense / 设计时构建产物（*.dt.*.json 常见于嵌套构建目录）
+app.dir/
+*.dt.d.json
+*.dt.module.json
+*.dt.module.json.command
+*.slnx.sqlite
 
 # ---------- CMake ----------
 CMakeCache.txt
 CMakeFiles/
 CMakeScripts/
+CMakeUserPresets.json
 cmake_install.cmake
 CTestTestfile.cmake
 install_manifest.txt
@@ -95,6 +104,7 @@ client/agent.id
 
 # ---------- 编辑器 / 系统 ----------
 .idea/
+.vscode/
 *.swp
 *~
 Thumbs.db

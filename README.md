@@ -60,6 +60,18 @@ cmake -S viewer -B viewer/build
 cmake --build viewer/build --config Debug      # 产物 viewer/build/bin/viewer.exe
 ```
 
+**im_ctl**（C++ ImGui 控制端，可选）：
+
+```
+cmake -S im_ctl -B im_ctl/build
+cmake --build im_ctl/build --config Debug
+```
+
+> 本仓库**不托管** `im_ctl/external/`（imgui / glad / glfw 第三方源码，且 imgui 自带独立
+> `.git`，见 `.gitignore`）。要构建 im_ctl，请先自行获取：
+> `imgui`（含 `backends/`）、`glad`（含 `src/glad.c`）、`glfw`（含 `lib-vc2026/glfw3.lib`）
+> 放到 `im_ctl/external/` 下，或改用 git submodule。viewer 不依赖这些，可直接构建。
+
 ## 运行与联调
 
 1. 启动 C2：`./bin/c2server.exe`（监听 4444 + 4445 + 8080，PSK 编译期内置）
