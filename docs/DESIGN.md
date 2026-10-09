@@ -165,6 +165,9 @@
 | `RatAgent.exe` | `RatAgent.vcxproj` | `main()` | 独立进程部署、调试 | CWD 下 `agent.id`；stdout |
 | `RatAgent.dll` | `RatAgentDll.vcxproj` | 导出函数 + `DllMain` | rundll32 / 宿主 LoadLibrary / 注入 | `%LOCALAPPDATA%\RatAgent\agent.id` + `agent.log`（`id=`/`log=` 可覆盖） |
 
+> 两个工程默认输出到同一目录（`client\x64\<Config>\`）也**不会互相覆盖**：
+> DLL 工程的 PDB/导入库已分离为 `RatAgentDll.pdb` / `RatAgentDll.lib`，并关闭了 `.ilk` 增量链接。
+
 DLL 侧关键设计（三处踩坑点）：
 
 1. **rundll32 的 `Start` 必须阻塞驻留**：入口点一返回 rundll32 就会结束进程，所以 `Start`
