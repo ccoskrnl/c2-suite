@@ -53,6 +53,13 @@ ctl ──payload 0x3009（分块）──▶ c2server（透明转发）──�
 ## 4. Git 提交历史（本仓库，均可回退）
 
 ```
+6c2b065 docs: 记录 Agent 双产物（形态/用法/注入契约/实测证据）
+3cd7d30 feat(agent): RatAgent 双产物 —— EXE/DLL 共享 core，支持 rundll32/宿主/注入与优雅停止
+fee717e docs: PROGRESS §8.2/8.3 收口（6 项既有问题+1 项新发现全部修复并附实测证据）
+4b4c072 fix(server): HELLO_ACK server_time 改小端 + beacon 零长度结果解码不再 EOF
+cf8943b fix(ctl): seq 在发送锁内分配 + 响应按 pending 优先投递
+6243970 fix(agent): 屏幕流 fps/quality 生效 + 线程状态机自愈 + 输入重装缓冲 + 未知指令回包
+226a3a5 fix: 按 review 结论修复交付面问题（越界读/UAF/坐标基准等）
 907d636 feat: viewer 远程查看器 + ctl_client 插件/wait 参数 + 文档同步
 66f5d66 feat: 协议扩展(0x1001 截屏/0x3009 payload) + Agent 实现 + ratctl 命令补全
 27e49f4 chore: 初始化仓库（VS 专用 .gitignore，仅托管源码与文档）
