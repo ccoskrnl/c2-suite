@@ -78,6 +78,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="core\main.cpp" />
+    <ClCompile Include="core\agent_runtime.cpp" />
     <ClCompile Include="core\protocol.cpp" />
     <ClCompile Include="core\crypto.cpp" />
     <ClCompile Include="core\net.cpp" />
@@ -89,6 +90,7 @@
     <ClCompile Include="core\desktop_switch.cpp" />
     <ClCompile Include="core\input_replay.cpp" />
     <ClInclude Include="core\protocol.h" />
+    <ClInclude Include="core\agent_runtime.h" />
     <ClInclude Include="core\crypto.h" />
     <ClInclude Include="core\net.h" />
     <ClInclude Include="core\session.h" />

