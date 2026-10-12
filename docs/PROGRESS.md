@@ -1,7 +1,7 @@
 # 项目进度记录（PROGRESS）
 
-> 最后更新：2026-09-30。供下次快速恢复工作状态。
-> 本文件记录**本仓库（`D:\code\projects\c2`）**的实际状态。
+> 最后更新：2026-10-12（本轮补 §8.5：外部反射加载器 RfUdrl 加载 RatAgent.dll 实测）。
+> 本文件记录**本仓库（`D:\code\projects\c2-suite`）**的实际状态。
 
 ## 1. 项目概览
 
@@ -31,6 +31,7 @@
 | **可停止**（进程内标志 + 跨进程命名事件） | ✅ | §8.4（rundll32 ↔ 另一进程 Stop；宿主存活） |
 | **`-tcp` 长连接模式可命令行切换**（不必改 `main()`） | ✅ | §8.4（sessions 显示真实 IP:PORT） |
 | **注入自启动触发器**（`autostart.args`） | ✅ | §8.4（远程 LoadLibrary 到 notepad 内上线） |
+| **反射加载（外部 RfUdrl）**：cpl link 出 PIC → runpic 宿主 → 手动映射上线/远控/优雅停止 | ✅ | §8.5（宿主模块表无 RatAgent.dll） |
 | 本地 git 版本管理（VS 专用 .gitignore） | ✅ | 见 §4 |
 
 ## 3. 关键架构（屏幕流 + payload）
@@ -114,7 +115,8 @@ screenshot [id] <file> / screen [id] [fps] [quality] [scale] / stop / payload <f
 6. **（可选）仓库内注入器/加载器工具**：本轮验证用的 `inject.exe`（远程 LoadLibrary + 触发器）
    是临时测试工具，未入库；如需长期使用可在 `tools/` 下补一个正式版本
 7. **（可选）手动映射 loader**：DLL 已按契约适配（静态 CRT/不依赖模块路径/无 TLS），
-   但仓库内没有 reflective loader
+   并已用**外部反射加载器 RfUdrl** 实测通过（§8.5）；仓库内只提供 PIC 执行器
+   `tools/runpic`（不含 loader 逻辑，loader 在 RfUdrl）
 
 ## 7. 已知注意点
 
@@ -208,3 +210,55 @@ screenshot [id] <file> / screen [id] [fps] [quality] [scale] / stop / payload <f
 正常。故注入采用"远程加载 + `autostart.args` 触发器自启动"。
 
 > 本轮验证用临时工具（`build/e2e/{host,inject}.cpp` + `probe`，gitignored；验证后已移入回收站）。
+
+### 8.5 第四轮：外部反射加载器（RfUdrl）加载 RatAgent.dll 实测
+
+**目标**：验证 Kali 上的反射加载项目 **RfUdrl**（Crystal Palace + LibTCG 的 PIC loader）
+能把 `RatAgent.dll` 完整走"手动映射（reflective load）"路径加载起来并可用。
+此前只有契约适配（静态 CRT/不依赖模块路径/无 TLS），**没有实测**。
+
+**组件**
+
+| 侧 | 组件 | 说明 |
+|---|---|---|
+| Kali | `~/opts/tcg/RfUdrl` | `make x64` → `cpl link loader.spec RatAgent.dll out.bin`（PIC，内嵌 DLL） |
+| Windows | `tools/runpic`（本仓库新增） | PIC 执行器：读 blob → RWX 映射 → `CreateThread` 进 `go()`（偏移 0） |
+| Windows | `RatAgent.dll` | MSVC `RatAgentDll.vcxproj` Debug x64（静态 CRT `/MT`），被 cpl 链进 PIC |
+| Windows | `c2server` / `ratctl` | 本套件，作 C2 侧验收 |
+
+**复现**
+
+```bash
+# Kali
+cd ~/opts/tcg/RfUdrl
+make x64 && /home/kali/opts/crystalpalace/cpl link loader.spec RatAgent.dll out.bin -g out.yar
+```
+```powershell
+# Windows：build/e2e/out.bin 就位后，一条命令跑完整验收
+python scripts/e2e_rdll.py   # 起 c2server → 写触发器 → runpic 执行 PIC → ratctl 验收 → 停止
+```
+
+**实测证据（`python scripts/e2e_rdll.py` = ALL PASS）**
+
+| 项 | 证据 |
+|---|---|
+| PIC 映射执行 | `pic mapped at 0000017EEF7B0000 (RWX), entry = offset 0` |
+| **DllMain 经合成栈正常返回** | `loader thread exited (code=1) — DLL entry point returned`（NtContinue 入口转移 + 合成栈；返回值 = DllMain 的 TRUE） |
+| **确为反射加载（非 LoadLibrary）** | 宿主进程模块表共 33 个模块，**没有** `RatAgent.dll`（`EnumProcessModulesEx` 实测） |
+| 入口点/CRT 初始化生效 | 映射镜像内 DLL 自己的 `autostart trigger` / `agent_start` / beacon 代码正常运行 |
+| beacon 上线 | c2server：`[beacon] <id> registered (first GET)`；agent：`[beacon] started ... cookie=<id>` |
+| 业务指令（beacon 经 GET/POST） | `0x3001 SYS_INFO` 259B、`0x3008 EXEC` 36B（`echo rdll-reflective-ok`）、`0x1001 SCREENSHOT` 206,225B JPEG，均 `results posted ok` |
+| 优雅停止 | 磁盘 DLL 的 `Stop` 导出（rundll32，**另一进程**）→ 命名事件 `Local\RatAgentStop.<id>` → `-> signalled` → `[beacon] stopped` + `agent worker exit (rc=0)` |
+
+**注意点**
+
+- RfUdrl 的入口转移假定"入口点不返回"；本 DLL 的 `DllMain` 会返回。实测返回后经合成
+  `BaseThreadInitThunk` 帧正常收尾（loader 线程退出码 = DllMain 返回值），不影响已启动的
+  agent 线程 —— 即"入口点返回"这一情形可用。
+- 自启动靠 `client/core` 的触发器（首选 `%LOCALAPPDATA%\RatAgent\autostart.args`，次选
+  `%TEMP%\RatAgent\autostart.args`）。受限沙箱里 LOCALAPPDATA 不可写，验收脚本自动挑可写位置。
+- **`rundll32 … Stop` 前必须先删触发器**：否则 Stop 宿主的 `DllMain` 也会命中触发器、自己
+  起一份 agent，`Stop` 就会走"同进程停止"分支，测不到跨进程命名事件这条路径。
+- `runpic` 自身 stdout 要设无缓冲：有控制台时 DLL 不做日志重定向，而 DLL 启动时会把 stdout
+  改成无缓冲，宿主的块缓冲输出会被丢掉。
+- 本轮未修改 RfUdrl 源码（只构建产物 + scp 的 DLL），故其仓库无提交。
