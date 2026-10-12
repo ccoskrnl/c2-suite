@@ -262,3 +262,23 @@ python scripts/e2e_rdll.py   # 起 c2server → 写触发器 → runpic 执行 P
 - `runpic` 自身 stdout 要设无缓冲：有控制台时 DLL 不做日志重定向，而 DLL 启动时会把 stdout
   改成无缓冲，宿主的块缓冲输出会被丢掉。
 - 本轮未修改 RfUdrl 源码（只构建产物 + scp 的 DLL），故其仓库无提交。
+
+**补充（同日）：Release 形态 + 显式默认自启开关**
+
+- 反射加载改用 **Release** 形态 DLL（375,296 B，`dumpbin /dependents` 仍只有系统 DLL），
+  PIC 379,512 B；全流程同样 **ALL PASS**。Debug/Release 行为一致，Release 体积小得多。
+- 新增**显式开关** `RAT_AUTOSTART_DEFAULT=1`（环境变量，DllMain 里用栈缓冲读，loader lock 安全）：
+  即使没有 `autostart.args` 也按**内置默认配置**自启（beacon 127.0.0.1:8080、`-s 5`；
+  id/日志落 `%LOCALAPPDATA%\RatAgent\`）。
+  - 动机：反射加载 / 远程 LoadLibrary 这类**没有参数通道**的场景，不必先落盘参数文件。
+  - **默认关闭**，不设置时行为与以前完全一致——`rundll32 … Stop` 不会在 Stop 进程内自启
+    （否则会退化成"同进程停止"，见上文注意点），宿主 `StartAgent` 也不会被抢跑；
+    存在 `autostart.args` 时仍以文件参数为准。
+- 验收脚本扩到**三阶段**（`scripts/e2e_rdll.py`，子进程 `LOCALAPPDATA` 指向工作区，
+  触发器/默认路径随之确定）：
+
+| 阶段 | 条件 | 期望 | 实测 |
+|---|---|---|---|
+| P1 | `autostart.args`（显式参数） | 完整远控 + 优雅停止 | ✅ 全项 PASS（含 294,948 B 截屏） |
+| P2 | 无触发器 + **无**开关 | **不得**自启 | ✅ 无 `[beacon] started`，注册数不变（1→1） |
+| P3 | 无触发器 + `RAT_AUTOSTART_DEFAULT=1` | 按默认配置自启 | ✅ `sleeptime=5s`（内置默认，P1 是 `-s 2`）、id 落 `…\home\RatAgent\agent.id`、注册数 1→2 |

