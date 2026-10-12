@@ -30,7 +30,7 @@
 | **Agent DLL 形态**（rundll32 / LoadLibrary / 注入） | ✅ | §8.4（导出表/依赖/三种宿主） |
 | **可停止**（进程内标志 + 跨进程命名事件） | ✅ | §8.4（rundll32 ↔ 另一进程 Stop；宿主存活） |
 | **`-tcp` 长连接模式可命令行切换**（不必改 `main()`） | ✅ | §8.4（sessions 显示真实 IP:PORT） |
-| **注入自启动触发器**（`autostart.args`） | ✅ | §8.4（远程 LoadLibrary 到 notepad 内上线） |
+| **加载即自启**（有 `autostart.args` 用文件参数，无则内置默认配置） | ✅ | §8.4 / §8.5 |
 | **反射加载（外部 RfUdrl）**：cpl link 出 PIC → runpic 宿主 → 手动映射上线/远控/优雅停止 | ✅ | §8.5（宿主模块表无 RatAgent.dll） |
 | 本地 git 版本管理（VS 专用 .gitignore） | ✅ | 见 §4 |
 
@@ -130,7 +130,8 @@ screenshot [id] <file> / screen [id] [fps] [quality] [scale] / stop / payload <f
   - 停止：进程内标志 + 命名事件 `Local\RatAgentStop.<agent_id_hex>`；
     `Stop` 可在**另一个进程**里按 id 文件或 32 位 hex 触发
   - 注入：**不要**把远程线程入口指向导出（目标的 CFG/XFG 会给 `0xC0000409`）；
-    用"写 `%LOCALAPPDATA%\RatAgent\autostart.args`（或 `%TEMP%` 下）→ 远程 `LoadLibraryW` → 触发器自启动"
+    用"远程 `LoadLibraryW` → 加载即自启"。自启是 DllMain 之后延迟 300ms 的线程：
+    有 `autostart.args` 用文件参数，**没有就用内置默认配置**（副作用见 §8.5 实测影响）
   - DLL 默认落盘 `%LOCALAPPDATA%\RatAgent\`（`agent.id`/`agent.log`），可用 `id=`/`log=` 覆盖；
     静态 CRT `/MT`，`dumpbin /dependents` 只有系统 DLL
   - 手动映射须先调用入口点（`DLL_PROCESS_ATTACH`）初始化 CRT，再调导出
@@ -263,22 +264,26 @@ python scripts/e2e_rdll.py   # 起 c2server → 写触发器 → runpic 执行 P
   改成无缓冲，宿主的块缓冲输出会被丢掉。
 - 本轮未修改 RfUdrl 源码（只构建产物 + scp 的 DLL），故其仓库无提交。
 
-**补充（同日）：Release 形态 + 显式默认自启开关**
+**补充（同日）：Release 形态 + "加载即自启"（无触发器文件即用默认配置）**
 
-- 反射加载改用 **Release** 形态 DLL（375,296 B，`dumpbin /dependents` 仍只有系统 DLL），
-  PIC 379,512 B；全流程同样 **ALL PASS**。Debug/Release 行为一致，Release 体积小得多。
-- 新增**显式开关** `RAT_AUTOSTART_DEFAULT=1`（环境变量，DllMain 里用栈缓冲读，loader lock 安全）：
-  即使没有 `autostart.args` 也按**内置默认配置**自启（beacon 127.0.0.1:8080、`-s 5`；
-  id/日志落 `%LOCALAPPDATA%\RatAgent\`）。
-  - 动机：反射加载 / 远程 LoadLibrary 这类**没有参数通道**的场景，不必先落盘参数文件。
-  - **默认关闭**，不设置时行为与以前完全一致——`rundll32 … Stop` 不会在 Stop 进程内自启
-    （否则会退化成"同进程停止"，见上文注意点），宿主 `StartAgent` 也不会被抢跑；
-    存在 `autostart.args` 时仍以文件参数为准。
-- 验收脚本扩到**三阶段**（`scripts/e2e_rdll.py`，子进程 `LOCALAPPDATA` 指向工作区，
-  触发器/默认路径随之确定）：
+- 反射加载改用 **Release** 形态 DLL（374,272 B，`dumpbin /dependents` 仍只有系统 DLL），
+  PIC 378,488 B；全流程同样 **ALL PASS**。Debug/Release 行为一致，Release 体积小得多。
+- 自启动语义改为**加载即自启**（并移除早前的 `RAT_AUTOSTART_DEFAULT` 环境变量开关）：
+  1. 有 `autostart.args` → 用文件里的参数串（**优先级最高**）；
+  2. 没有该文件 → 用**内置默认配置**（beacon 127.0.0.1:8080、`-s 5`；id/日志落
+     `%LOCALAPPDATA%\RatAgent\`）。
+- 验收脚本相应简化为**两阶段**（`scripts/e2e_rdll.py`，子进程 `LOCALAPPDATA` 指向工作区）：
 
 | 阶段 | 条件 | 期望 | 实测 |
 |---|---|---|---|
-| P1 | `autostart.args`（显式参数） | 完整远控 + 优雅停止 | ✅ 全项 PASS（含 294,948 B 截屏） |
-| P2 | 无触发器 + **无**开关 | **不得**自启 | ✅ 无 `[beacon] started`，注册数不变（1→1） |
-| P3 | 无触发器 + `RAT_AUTOSTART_DEFAULT=1` | 按默认配置自启 | ✅ `sleeptime=5s`（内置默认，P1 是 `-s 2`）、id 落 `…\home\RatAgent\agent.id`、注册数 1→2 |
+| P1 | 有 `autostart.args`（显式参数） | 完整远控 + 跨进程优雅停止 | ✅ 全项 PASS（含 231,620 B 截屏） |
+| P2 | 无 `autostart.args` | 按内置默认配置自启 | ✅ `sleeptime=5s`（P1 是 `-s 2`）、id 落 `…\home\RatAgent\agent.id`、注册数 1→2 |
+
+**"加载即自启"的实测影响**（`build/e2e/check_rundll32.py`，一次性诊断，未入库）：
+
+| 场景 | 实测结果 |
+|---|---|
+| `rundll32 … Start <args>`（无触发器文件） | ✅ 显式参数生效（`sleeptime=3s`）、rundll32 驻留；但日志多一对噪声：`autostart (no trigger -> default config)` + `[!] already running` |
+| `rundll32 … Stop <id>`（无触发器文件） | ✅ 目标实例被停止（`-> signalled` + `[beacon] stopped`），未走同进程分支；`Stop` 不阻塞、rundll32 在 300ms 自启前就退出，**不产生幻影 agent** |
+| 常驻 `LoadLibrary` 宿主、不调用任何导出 | ⚠ **宿主进程内自动起一份默认 agent**（实测：`agent_start … sleeptime=5`、默认 `agent.id` 落盘） |
+| 常驻宿主、晚于 300ms 才 `StartAgent(args)` | ⚠ 结构性风险：默认自启先占坑 → 参数被忽略（本机未复现，取决于加载/杀软延迟） |

@@ -88,16 +88,19 @@ rundll32 RatAgent.dll,Stop  id=<agent.id 路径或 32 位 hex>
 :: 2) 自己的加载器 / 宿主（同进程启停，可 FreeLibrary 卸载）
 LoadLibraryW(L"RatAgent.dll") → StartAgent("127.0.0.1,8080,-s,5") → … → StopAgent()
 
-:: 3) 注入（远程 LoadLibrary + 触发器自启动）
-::    先写好 %TEMP%\RatAgent\autostart.args（内容 = 参数串），再让目标进程远程 LoadLibraryW 本 DLL；
-::    DllMain 检测到触发器即在自建线程上启动；删除该文件即关闭自启动。
-
-:: 4) 反射加载 / 其它没有参数通道的宿主（不落盘即自启）
-::    在加载进程的环境里设 RAT_AUTOSTART_DEFAULT=1，DllMain 后按**内置默认配置**自启
-::    （beacon 127.0.0.1:8080、轮询 5s；agent.id/日志落 %LOCALAPPDATA%\RatAgent\）。
-::    该开关**默认关闭**：不设置时行为与以前完全一致（rundll32 Stop / 宿主 StartAgent
-::    不会被抢跑）；若同时存在 autostart.args，仍以文件里的参数为准。
+:: 3) 注入 / 反射加载（远程 LoadLibrary，或手动映射；这类场景没有参数通道）
+::    本 DLL **加载即自启**：有 %LOCALAPPDATA%\RatAgent\autostart.args（或 %TEMP% 下同名
+::    文件）就用文件里的参数串；**没有该文件则用内置默认配置**（beacon 127.0.0.1:8080、
+::    轮询 5s；agent.id / 日志落 %LOCALAPPDATA%\RatAgent\）。
 ```
+
+> ⚠ **加载即自启的副作用**：自启在 DllMain 之后的新线程上**延迟 300ms** 执行，而显式入口
+> （rundll32 的 `Start`/`Stop`、宿主的 `StartAgent`）是加载完成后立即调用的，两者存在竞争。
+> 实测（本机）：`Start <args>` 显式参数仍生效、进程驻留；`Stop <id>` 跨进程停止正常，且
+> `Stop` 不阻塞、进程在 300ms 前就退出，**不会**留下自启实例。但**不调用任何导出的常驻
+> `LoadLibrary` 宿主会在自己进程里自动起一份默认 agent**；若显式调用晚于这 300ms，也会被
+> 默认自启抢先（参数被忽略 / `Stop` 退化为同进程停止）。要规避就写 `autostart.args` 给定
+> 参数，或避免常驻宿主。
 
 > **为什么注入要这样**：现代 Windows 目标的 CFG/XFG 会拦住"把远程线程入口指向镜像内任意导出"
 > （表现为 `0xC0000409`/`__fastfail`），但远程 `LoadLibraryW`（kernel32 地址）仍然可用。
