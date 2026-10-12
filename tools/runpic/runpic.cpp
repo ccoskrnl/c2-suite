@@ -70,6 +70,11 @@ namespace
 
 int wmain(int argc, wchar_t** argv)
 {
+    // 自己的诊断输出不缓冲：stdout 是管道/文件时 CRT 默认块缓冲，而加载出的
+    // DLL 会在启动时把 stdout 改成无缓冲（client/core 的 agent_start），此前
+    // 缓冲在内存里的宿主输出会被丢掉。
+    setvbuf(stdout, nullptr, _IONBF, 0);
+
     if (argc < 2)
     {
         usage();
