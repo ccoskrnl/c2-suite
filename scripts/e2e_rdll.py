@@ -273,14 +273,11 @@ def main():
         out3 = sh.send([f"exec echo {marker}"], 10)
         check("exec 回传", marker in out3, repr(out3[-100:]))
 
-        out4 = sh.send([f"screenshot {aid} {fwd(SHOT)}"], 20)
-        jpeg_ok = False
-        if os.path.exists(SHOT):
-            with open(SHOT, "rb") as f:
-                head = f.read(2)
-            jpeg_ok = head == b"\xff\xd8" and os.path.getsize(SHOT) > 1024
-        check("screenshot 生成 JPEG", jpeg_ok,
-              f"{os.path.getsize(SHOT)} bytes" if os.path.exists(SHOT) else "missing")
+        # 截屏/屏幕流（0x1001/0x1002）已在模块化阶段 2 移到 screen 模块，
+        # full 不再提供；这里改为验证"确实没有"，能力覆盖见 scripts/e2e_screen.py
+        out4 = sh.send(["raw 1001"], 10)
+        check("full 已无 0x1001（阶段2 拆到 screen 模块）",
+              "status : 0x01" in out4, repr(out4[-90:]))
         sh.close()
         sh = None
 

@@ -117,26 +117,61 @@ func (st *shellState) dispatch(line string) bool {
 	return true
 }
 
-// resolveAgent 把 id 前缀解析为完整 agent id（先查缓存，未命中则刷新一次会话表）。
+// resolveAgent 把 id 前缀**或模块标签**解析为完整 agent id。
+//
+//	· 先按 id 前缀匹配（原行为）；
+//	· 未命中时刷新一次会话表再试；
+//	· 仍未命中则按**模块标签**匹配：会话的 os 形如 "Windows (screen)"，
+//	  标签就是括号里的模块名（模块化后一台机器上会有多个模块 agent，
+//	  用 `use screen` / `screen screen` 比手抄 32 位 id 方便）。
+//	  标签必须**唯一命中**：多台机器都跑同名模块时打印候选，让用户改用 id 前缀。
 func (st *shellState) resolveAgent(prefix string) (string, bool) {
 	if prefix == "" {
 		return "", false
 	}
-	for _, s := range st.sessions {
-		if strings.HasPrefix(s.ID, prefix) {
-			return s.ID, true
-		}
+	if id, ok := matchIDPrefix(st.sessions, prefix); ok {
+		return id, true
 	}
 	_, body, err := st.sendAndWait(protocol.CtlList, protocol.PluginCtl, nil,
 		protocol.CtlList, waitTimeout)
 	if err == nil {
 		if sessions, derr := decodeSessions(body); derr == nil {
 			st.sessions = sessions
-			for _, s := range sessions {
-				if strings.HasPrefix(s.ID, prefix) {
-					return s.ID, true
-				}
+			if id, ok := matchIDPrefix(sessions, prefix); ok {
+				return id, true
 			}
+			return matchModuleTag(sessions, prefix)
+		}
+	}
+	return "", false
+}
+
+// matchIDPrefix 按 agent_id 前缀匹配。
+func matchIDPrefix(sessions []SessionInfo, prefix string) (string, bool) {
+	for _, s := range sessions {
+		if strings.HasPrefix(s.ID, prefix) {
+			return s.ID, true
+		}
+	}
+	return "", false
+}
+
+// matchModuleTag 按模块标签（os 里的 "(<module>)"）匹配，要求唯一命中。
+func matchModuleTag(sessions []SessionInfo, tag string) (string, bool) {
+	needle := "(" + tag + ")"
+	var hits []SessionInfo
+	for _, s := range sessions {
+		if strings.Contains(s.OS, needle) {
+			hits = append(hits, s)
+		}
+	}
+	if len(hits) == 1 {
+		return hits[0].ID, true
+	}
+	if len(hits) > 1 {
+		fmt.Printf("[!] 模块 %q 有 %d 个会话，请用 id 前缀指定：\n", tag, len(hits))
+		for _, s := range hits {
+			fmt.Printf("      %s  %s  %s\n", s.ID[:8], s.IP, s.OS)
 		}
 	}
 	return "", false
@@ -474,7 +509,7 @@ func printHelp() {
 
 会话管理:
   sessions                  列出在线 Agent
-  use <agent_id>            切换到目标 Agent（支持前缀匹配）
+  use <agent_id|模块名>      切换到目标 Agent（支持 id 前缀；也可用模块名如 use screen）
   back                      退出当前 Agent
   session <agent_id>        查看单个会话详情
   kill <agent_id>           踢 Agent 下线（关闭其连接）

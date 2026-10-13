@@ -10,8 +10,8 @@
 # 只走 TCP 长连接的 HELLO —— 模块标签在 beacon 上是个已知缺口（待单独补协议）。
 #
 # 前置（同一工程编两次）：
-#   build/agent-full/bin/RatAgent.exe    ← 默认（module=full, caps=sys|remote）
-#   build/agent-probe/bin/RatAgent.exe   ← -p:RatAgentModuleId=probe -p:RatAgentModuleCaps=(c2::kCapSys)
+#   build/agent-full/bin/RatAgent.exe    ← 默认（module=full,  caps=sys  = 0x1）
+#   build/agent-probe/bin/RatAgent.exe   ← -p:RatAgentModuleId=probe -p:RatAgentModuleCaps=(c2::kCapRemote)  = 0x2
 import os
 import shutil
 import subprocess
@@ -107,9 +107,9 @@ def main():
 
         # 3) 模块标签 + 能力位（走 HELLO → 服务端 OSInfo/Plugins）
         check("服务端收到 full 的模块标签",
-              'os="Windows (full)"' in log and "plugins=0x00000003" in log)
+              'os="Windows (full)"' in log and "plugins=0x00000001" in log)
         check("服务端收到 probe 的模块标签",
-              'os="Windows (probe)"' in log and "plugins=0x00000001" in log)
+              'os="Windows (probe)"' in log and "plugins=0x00000002" in log)
 
         # 4) 控制端展示（session <id> 打印 os/plugins）
         if h_full:
@@ -118,7 +118,7 @@ def main():
                                capture_output=True, text=True, timeout=60)
             out = (p.stdout or "") + (p.stderr or "")
             check("ratctl session 显示模块标签", "Windows (full)" in out, repr(out[-90:]))
-            check("ratctl session 显示能力位", "0x00000003" in out)
+            check("ratctl session 显示能力位", "0x00000001" in out)
     finally:
         for proc in (a_full, a_probe):
             if proc and proc.poll() is None:

