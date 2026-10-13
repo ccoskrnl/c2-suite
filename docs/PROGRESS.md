@@ -357,11 +357,41 @@ runpic 宿主自身输出仍在而 **agent 诊断行 0 条**、`%LOCALAPPDATA%\R
 （[beacon.go](../server/cmd/c2server/beacon.go)），握手元数据只走 TCP 长连接的 HELLO
 → **模块标签在 beacon 模式不可见**，需要一次小的协议补充（待做）。
 
-### 9.2 阶段 1/2（待做）
+### 9.2 阶段 1：共享内核 + 模块模板（✅ 完成）
 
-1. **阶段 1**：抽共享内核 + **切断 core 对具体能力的反向依赖**
-   （`agent_runtime → screen_stream_set_config`、`cmd_dispatch → screen_*`），
-   建立可复制的模块模板工程，并验证"复制模板加模块不必改 core"；
-2. **阶段 2**：把"远程桌面"整组（`screen_spy`/`screen_stream`/`input_replay`/`desktop_switch`，
-   780 行）拆成独立 agent、**直连 C2**（命令走自己的信道、数据走现有 4445），
-   并从全量 agent 移除（含 `dxgi`/`windowscodecs` 依赖），ctl 侧按模块标签解析目标。
+**目标**：切断 core 对具体能力的反向依赖，并建立"复制模板即可加模块"的骨架。
+
+**改法**：新增能力注册表，core 不再认识任何具体能力
+
+| 文件 | 作用 |
+|---|---|
+| [core/capability.h](../client/core/capability.h) / `.cpp` | 注册表：**指令处理器表** + **配置钩子**；`cap_ensure_registered()` / `cap_dispatch()` / `cap_notify_config()` |
+| [core/screen_module.h](../client/core/screen_module.h) / `.cpp` | 原长在 core 里的屏幕能力：`0x1001` 截屏、`0x1002` 屏幕流、配置钩子（**阶段 2 整体搬走**） |
+| [client/caps_full.cpp](../client/caps_full.cpp) | 工程级能力清单：`register_module_capabilities()` —— **加/减能力只改这里** |
+| [client/agents/_template/](../client/agents/_template/) | 模块工程模板（DLL + EXE 两个工程 + `caps.cpp` + README） |
+
+具体动作：
+- `cmd_dispatch.cpp`：删掉 `screen_spy`/`screen_stream` 的 include 与 `0x1001`/`0x1002` 两个 case；
+  `switch` 的 `default` 改为**先查能力注册表**，未命中才算未知指令；
+- `agent_runtime.cpp`：删掉 `screen_stream.h`，两处 `screen_stream_set_config()` 改为 `cap_notify_config()`；
+  `agent_start()` 里调用一次 `cap_ensure_registered()`（幂等）；
+- 两个 vcxproj 增加 `caps_full.cpp` / `capability.cpp` / `screen_module.cpp`，并把 `core` 加入头文件搜索路径；
+- `ratctl` 新增 **`raw <cmd_hex> [payload_hex]`**：发送任意业务指令，用于测新模块的自定义指令。
+
+**实测证据（五项验收全绿）**
+
+| 脚本 | 验证内容 | 结果 |
+|---|---|---|
+| `scripts/e2e_caps.py` | 搬移后行为不变：`0x1001` 截屏（218 KB JPEG）、`0x1002` 屏幕流 stop | ✅ ALL PASS |
+| `scripts/e2e_template.py` | 模板独立编译并上线：`template.id`、标签 `Windows (template)`、能力位 `0x1`、**自定义指令 `raw 2001 deadbeef` → `demo-echo`**、core 的 `sysinfo` 照常 | ✅ ALL PASS |
+| `scripts/e2e_modules.py` | 同机多模块共存（full + probe） | ✅ ALL PASS |
+| `scripts/e2e_rdll.py` | 反射加载全流程 + 跨进程停止 | ✅ ALL PASS |
+| `scripts/e2e_quiet.py` | 静默构建（零输出零文件） | ✅ ALL PASS |
+
+**硬指标达成**：模板工程**没有修改任何 core 文件**即可产出可上线、可应答自定义指令的新模块。
+
+### 9.3 阶段 2（待做）
+
+把"远程桌面"整组（`screen_spy`/`screen_stream`/`input_replay`/`desktop_switch`，780 行）拆成独立
+agent、**直连 C2**（命令走自己的信道、数据走现有 4445），并从全量 agent 移除
+（含 `dxgi`/`windowscodecs` 依赖），ctl 侧按模块标签解析目标。

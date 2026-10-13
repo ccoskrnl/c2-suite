@@ -35,12 +35,15 @@ c2/
 │   ├── RatAgent.sln
 │   ├── RatAgent.vcxproj       # → RatAgent.exe（控制台形态）
 │   ├── RatAgentDll.vcxproj    # → RatAgent.dll（rundll32 / 宿主 / 注入；静态 CRT）
-│   └── core/                  # protocol/crypto/net/session/screen/cmd_dispatch
+│   ├── caps_full.cpp          # "full"模块的能力清单（每个模块工程一份）
+│   ├── agents/_template/      # **模块工程模板**：复制它开新模块（见其 README）
+│   └── core/                  # protocol/crypto/net/session/cmd_dispatch/capability
 │                              # + agent_runtime(共用运行核心) / agent_dll(导出) / main(EXE 入口)
+│                              # + module_id(模块命名空间) / agent_debug(诊断开关)
 ├── viewer/                    # C++ Win32 远控查看器（独立 CMake 工程）
 ├── im_ctl/                    # C++ ImGui 控制端
 ├── tools/runpic/              # PIC blob 执行器（反射加载验证 harness，配合外部 loader）
-└── scripts/                   # e2e_m1~m4 + e2e_rdll + ctl_stream_probe
+└── scripts/                   # e2e_m1~m4 + e2e_rdll/e2e_quiet/e2e_modules/e2e_caps/e2e_template
 ```
 
 ## 构建
