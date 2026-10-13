@@ -30,19 +30,22 @@ RUNPIC = os.path.join(ROOT, "build", "runpic", "bin", "runpic.exe")
 C2 = os.path.join(ROOT, "build", "bin", "c2server.exe")
 RATCTL = os.path.join(ROOT, "build", "bin", "ratctl.exe")
 DLL = os.path.join(ROOT, "build", "dll-release", "bin", "RatAgent.dll")  # Release 形态
+# 模块名必须与 DLL 的 RatAgentModuleId 一致(默认 full)——它决定 id/日志/自启文件的文件名
+# (见 client/core/module_id.h)
+MODULE = "full"
 WORK = os.path.join(ROOT, "build", "e2e")
-AGENT_ID = os.path.join(WORK, "agent.id")
-AGENT_LOG = os.path.join(WORK, "agent.log")
+AGENT_ID = os.path.join(WORK, f"{MODULE}.id")
+AGENT_LOG = os.path.join(WORK, f"{MODULE}.log")
 RUNPIC_LOG = os.path.join(WORK, "runpic.log")
 C2_LOG = os.path.join(WORK, "c2server.log")
 SHOT = os.path.join(WORK, "shot.jpg")
 
-# 把子进程的 LOCALAPPDATA 指进工作区:默认路径(autostart.args / agent.id / agent.log)
+# 把子进程的 LOCALAPPDATA 指进工作区:默认路径(<module>.autostart.args / .id / .log)
 # 落在可写且可查的位置,触发器路径随之确定(不必再去挑 %TEMP%)。
 HOME = os.path.join(WORK, "home")
-TRIGGER = os.path.join(HOME, "RatAgent", "autostart.args")
-DEFAULT_ID = os.path.join(HOME, "RatAgent", "agent.id")
-DEFAULT_LOG = os.path.join(HOME, "RatAgent", "agent.log")
+TRIGGER = os.path.join(HOME, "RatAgent", f"{MODULE}.autostart.args")
+DEFAULT_ID = os.path.join(HOME, "RatAgent", f"{MODULE}.id")
+DEFAULT_LOG = os.path.join(HOME, "RatAgent", f"{MODULE}.log")
 
 
 def fwd(p):
