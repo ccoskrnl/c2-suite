@@ -390,8 +390,41 @@ runpic 宿主自身输出仍在而 **agent 诊断行 0 条**、`%LOCALAPPDATA%\R
 
 **硬指标达成**：模板工程**没有修改任何 core 文件**即可产出可上线、可应答自定义指令的新模块。
 
-### 9.3 阶段 2（待做）
+### 9.3 阶段 2：远程桌面拆成独立 agent（✅ 完成）
 
-把"远程桌面"整组（`screen_spy`/`screen_stream`/`input_replay`/`desktop_switch`，780 行）拆成独立
-agent、**直连 C2**（命令走自己的信道、数据走现有 4445），并从全量 agent 移除
-（含 `dxgi`/`windowscodecs` 依赖），ctl 侧按模块标签解析目标。
+**动作**：把"远程桌面"整组从 `client/core` 用 `git mv` 搬到 `client/agents/screen/`
+（保留历史），成为一个**独立 agent、直连 C2**（命令走自己的信道，数据继续走 4445 中继）：
+
+| 搬到 `client/agents/screen/` | 说明 |
+|---|---|
+| `screen_spy.*` | 抓帧（GDI/DXGI） |
+| `screen_stream.*` | 4445 长连接 + 帧上行 + 输入下行 |
+| `input_replay.*` | SendInput 注入 |
+| `desktop_switch.*` | 输入桌面切换 |
+| `screen_module.*` | 能力注册（阶段 1 建的）+ `0x1001`/`0x1002` 指令实现 |
+| `caps.cpp` | 工程级能力清单 → `screen_module_register()` |
+| `RatAgent.screen.vcxproj` / `.exe.vcxproj` | 两个工程（模块 id `screen`，能力位 `kCapRemote`） |
+
+同时：
+- 全量 agent（`RatAgent.vcxproj` / `RatAgentDll.vcxproj`）**移除这 5 个源文件**与
+  `windowscodecs` 链接；`caps_full.cpp` 变为"不登记额外能力"；
+  `RatAgentModuleCaps` 默认改为 `(c2::kCapSys)`（full 不再宣称有远程桌面能力）；
+- `ratctl` 的 `resolveAgent()` 支持**按模块标签**解析目标（`use screen` / `screen screen`），
+  多台机器同名模块时报错并列出候选，要求改用 id 前缀。
+
+**实测证据**
+
+| 项 | 结果 |
+|---|---|
+| `python scripts/e2e_screen.py` | ✅ **ALL PASS**：full+screen 同机共存（`full.id`/`screen.id`、标签 `Windows (full)`/`Windows (screen)`、能力位 `0x1`/`0x2`）；screen 的 `0x1001` 截屏 **214 KB JPEG**；`0x1002` 开流后 C2 日志出现 `[stream] <id>: relay frame #1 (202 KB)`；从**另一个会话**停流生效且 4445 连接被移除；`use screen` / `use full` 标签解析生效；**full 上 `0x1001`/`0x1002` 均返回未知指令 `status=0x01`** |
+| 回归 | `e2e_modules` / `e2e_template` / `e2e_rdll` / `e2e_quiet` 均 **ALL PASS** |
+
+**依赖面收缩**（`dumpbin /dependents`）：全量 DLL 不再有 `GDI32`/`USER32`/`ole32`/`OLEAUT32`
+（`windowscodecs` 是 COM 组件，本就不在导入表里）；体积 374,272 → **361,984 B**。
+屏幕模块 DLL **378,880 B**（带 WIC/DXGI 依赖）。
+
+### 9.4 后续（可选）
+
+- 让 `screen` 模块也支持"注入/反射加载"交付（它已经是标准模块，可用 `tools/runpic` + RfUdrl 链 PIC）；
+- beacon 信道的模块标签（需一次小的协议补充，见 §9.1 已知缺口）；
+- 若不再需要"父模块管生命周期"，可评估阶段 5 的 IPC/hub 化（当前形态：模块各自直连 C2）。

