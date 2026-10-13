@@ -148,7 +148,7 @@
 
 | 模块 | 职责 |
 |---|---|
-| `agent_runtime` | **EXE/DLL 共用的运行核心**：参数解析（空格/逗号分隔，兼容 rundll32）、启动/停止/状态、`agent.id` 与日志路径解析、可停止的睡眠、活动 socket 注册（stop 时 `shutdown` 打断阻塞读）、跨进程停止命名事件、注入自启动触发器 |
+| `agent_runtime` | **EXE/DLL 共用的运行核心**：参数解析（空格/逗号分隔，兼容 rundll32）、启动/停止/状态、`<module>.id` 与日志路径解析（模块命名空间见 `module_id.h`）、可停止的睡眠、活动 socket 注册（stop 时 `shutdown` 打断阻塞读）、跨进程停止命名事件、加载即自启动 |
 | `main.cpp` | EXE 入口（薄壳）：解析 argv → `agent_start` → `agent_wait(-1)`；支持 `-tcp`（长连接）与 `--selftest` |
 | `agent_dll.cpp` | DLL 入口：rundll32 导出 `Start`/`Stop`（`Start` 阻塞驻留）、加载器/注入导出 `StartAgent`/`StopAgent`/`StopAgentEx`/`AgentRunning`/`AgentVersion`/`AgentMode`/`AgentPing`/`AgentBootstrap`；`DllMain` 只做触发器探测与停止标志（不在 loader lock 下做重活） |
 | `session` | 握手、心跳线程（15s，seq 递增，分片睡眠可被停止唤醒） |
@@ -162,8 +162,8 @@
 
 | 形态 | 工程 | 入口 | 适用场景 | 身份/日志 |
 |---|---|---|---|---|
-| `RatAgent.exe` | `RatAgent.vcxproj` | `main()` | 独立进程部署、调试 | CWD 下 `agent.id`；stdout |
-| `RatAgent.dll` | `RatAgentDll.vcxproj` | 导出函数 + `DllMain` | rundll32 / 宿主 LoadLibrary / 注入 | `%LOCALAPPDATA%\RatAgent\agent.id` + `agent.log`（`id=`/`log=` 可覆盖） |
+| `RatAgent.exe` | `RatAgent.vcxproj` | `main()` | 独立进程部署、调试 | CWD 下 `<module>.id`；stdout |
+| `RatAgent.dll` | `RatAgentDll.vcxproj` | 导出函数 + `DllMain` | rundll32 / 宿主 LoadLibrary / 注入 | `%LOCALAPPDATA%\RatAgent\<module>.id` + `<module>.log`（`id=`/`log=` 可覆盖） |
 
 > 两个工程默认输出到同一目录（`client\x64\<Config>\`）也**不会互相覆盖**：
 > DLL 工程的 PDB/导入库已分离为 `RatAgentDll.pdb` / `RatAgentDll.lib`，并关闭了 `.ilk` 增量链接。
@@ -177,7 +177,7 @@ DLL 侧关键设计（三处踩坑点）：
    被停实例的循环/睡眠/阻塞读都会被唤醒并优雅退出（host 进程不受影响）。
 3. **注入路径避开 CFG/XFG**：现代 Windows 目标会拦住"远程线程入口指向镜像内任意导出"
    （`0xC0000409`/`__fastfail`，实测连零依赖的探针导出也一样），但远程 `LoadLibraryW` 可用；
-   因此采用**触发器自启动**：注入方先写 `%LOCALAPPDATA%\RatAgent\autostart.args`（或 `%TEMP%\RatAgent\autostart.args`），
+   因此采用**触发器自启动**：注入方先写 `%LOCALAPPDATA%\RatAgent\<module>.autostart.args`（或 `%TEMP%\RatAgent\<module>.autostart.args`），
    再远程 `LoadLibraryW`，`DllMain` 检测到触发器后交给 `_beginthreadex` 建的新线程去解析并启动。
 
 **手动映射契约**：DLL 用静态 CRT（`/MT`，实测依赖项只有系统 DLL，无 VC 运行库）；
@@ -353,10 +353,12 @@ python scripts/e2e_m3.py   # beacon 轮询 + 交互式 ratctl
 - **注入方式限制**：现代 Windows 目标的 CFG/XFG 会拦住"远程线程入口指向镜像内导出"
   （`0xC0000409`）；请用"远程 `LoadLibraryW` + `autostart.args` 触发器"，或手动映射
   （须先调用入口点，见 §4.2.1）
-- **注入自启动触发器需人工清理**：`%LOCALAPPDATA%\RatAgent\autostart.args`（或 `%TEMP%` 下同名）
+- **注入自启动触发器需人工清理**：`%LOCALAPPDATA%\RatAgent\<module>.autostart.args`（或 `%TEMP%` 下同名）
   存在即自启动，删除该文件才会关闭；DLL 不自动删（避免误删）
-- **DLL 形态默认落盘位置**：`%LOCALAPPDATA%\RatAgent\`（`agent.id` / `agent.log`），
-  可用 `id=`/`log=` 覆盖；EXE 形态仍用 CWD 下的 `agent.id`（保持历史行为）
+- **DLL 形态默认落盘位置**：`%LOCALAPPDATA%\RatAgent\`（`<module>.id` / `<module>.log`），
+  可用 `id=`/`log=` 覆盖；EXE 形态仍用 CWD 下的 `<module>.id`（保持历史行为）
+- **`<module>` 是模块命名空间前缀**（`client/core/module_id.h`，默认 `full`）：同机多模块共存时
+  身份/日志/自启文件必须分开，否则服务器按 `agent_id` 索引会互相踢下线（见 PROGRESS §9.1）
 - **信道语义**：未知指令两信道一致（都回 `CMD_RESULT(status=1)`）；
   beacon 结果块允许零长度结果（`decodeResults` 用 `io.ReadFull`，`ln==0` 不读）
 - `im_ctl/external/imgui` 为内嵌 git 仓库（gitlink），clone 需单独处理

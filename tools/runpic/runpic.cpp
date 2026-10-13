@@ -16,9 +16,10 @@
 // 注意：
 //   - 本进程就是宿主：进程退出 = 加载出的所有线程随之终止；
 //   - 若要加载的 RatAgent 自动上线，先写好 autostart 触发器再运行本程序：
-//     %LOCALAPPDATA%\RatAgent\autostart.args（首行 = 参数串，如
+//     %LOCALAPPDATA%\RatAgent\<module>.autostart.args（首行 = 参数串，如
 //     "127.0.0.1,8080,-s,2,id=...,log=..."），DllMain 检测到即自建线程启动；
-//   - 无控制台时 DLL 会自己把日志落到 %LOCALAPPDATA%\RatAgent\agent.log。
+//     `<module>` 见 client/core/module_id.h（默认 full）。
+//   - 无控制台时 DLL 会自己把日志落到 %LOCALAPPDATA%\RatAgent\<module>.log。
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 

