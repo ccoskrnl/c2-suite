@@ -32,6 +32,7 @@
 | **`-tcp` 长连接模式可命令行切换**（不必改 `main()`） | ✅ | §8.4（sessions 显示真实 IP:PORT） |
 | **加载即自启**（有 `autostart.args` 用文件参数，无则内置默认配置） | ✅ | §8.4 / §8.5 |
 | **反射加载（外部 RfUdrl）**：cpl link 出 PIC → runpic 宿主 → 手动映射上线/远控/优雅停止 | ✅ | §8.5（宿主模块表无 RatAgent.dll） |
+| **静默构建**（`RAT_AGENT_DEBUG=0`：无诊断输出、磁盘零写入） | ✅ | §8.6（诊断串 6/6 → 0/6） |
 | 本地 git 版本管理（VS 专用 .gitignore） | ✅ | 见 §4 |
 
 ## 3. 关键架构（屏幕流 + payload）
@@ -287,3 +288,37 @@ python scripts/e2e_rdll.py   # 起 c2server → 写触发器 → runpic 执行 P
 | `rundll32 … Stop <id>`（无触发器文件） | ✅ 目标实例被停止（`-> signalled` + `[beacon] stopped`），未走同进程分支；`Stop` 不阻塞、rundll32 在 300ms 自启前就退出，**不产生幻影 agent** |
 | 常驻 `LoadLibrary` 宿主、不调用任何导出 | ⚠ **宿主进程内自动起一份默认 agent**（实测：`agent_start … sleeptime=5`、默认 `agent.id` 落盘） |
 | 常驻宿主、晚于 300ms 才 `StartAgent(args)` | ⚠ 结构性风险：默认自启先占坑 → 参数被忽略（本机未复现，取决于加载/杀软延迟） |
+
+### 8.6 第五轮：静默构建（编译期开关）
+
+**目的**：能出一个"最小可观测面"的 Agent —— 不打印任何诊断、不在磁盘留任何文件（降 IOC）。
+
+**实现**：新增 `client/core/agent_debug.h`，两个编译期宏（可由 MSBuild 属性覆盖，默认保持既有行为）
+
+| 宏 | MSBuild 属性 | 默认 | 作用 |
+|---|---|---|---|
+| `RAT_AGENT_DEBUG` | `RatAgentDebug` | 1 | 0 → `AGENT_LOG(...)` 展开为空操作（**格式串不进二进制**），不落日志、不碰 stdout |
+| `RAT_AGENT_PERSIST_ID` | `RatAgentPersistId` | 跟随前者 | 0 → `agent.id` 不落盘，身份只在内存 |
+
+- 65 处诊断 `printf` 统一改为 `AGENT_LOG(...)`；`snprintf`（构造命令结果用）不受影响。
+- 静默时同时跳过：建目录、`_wfreopen` 落日志、`setvbuf`（不再改宿主 stdout）；
+  `agent_redirect_stdout()` 内部也加了兜底，任何调用方都无法在静默构建下落日志。
+- **顺带修掉一个身份一致性隐患**：新增 `agent_ensure_id()` 做"进程内唯一 id"缓存。
+  静默构建下 id 不落盘，若不缓存，`agent_start`（拿它命名停止事件）与 worker（拿它上报
+  cookie）会各自随机出一个 id —— "服务器看到的 id"与"事件名里的 id"就对不上。
+
+**实测证据**
+
+| 项 | 常规（默认 1/1） | 静默（`RatAgentDebug=0`） |
+|---|---|---|
+| DLL 体积（Release） | 374,784 B | **351,232 B** |
+| 典型诊断串命中（6 条） | 6/6 | **0/6** |
+| `python scripts/e2e_quiet.py` | — | **ALL PASS**（上线 + sysinfo + 零输出 + 零文件） |
+| `python scripts/e2e_rdll.py`（回归） | **ALL PASS** | —（默认行为未变） |
+
+静默实测细节：agent 以默认配置上线（服务器 `registered (first GET)`）、`sysinfo` 正常回传、
+runpic 宿主自身输出仍在而 **agent 诊断行 0 条**、`%LOCALAPPDATA%\RatAgent` 目录**未被创建**、
+`agent.log` 与 `agent.id` 均不存在。
+
+**代价（已文档化）**：静默版重启后 id 变化 → "重连同 id"与"凭 id 文件跨进程停止"不再成立
+（仍可按已知 32 位 hex 触发事件）；命名事件 `Local\RatAgentStop.<id>` 仍会创建（内核对象，非磁盘 IOC）。

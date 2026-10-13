@@ -65,6 +65,29 @@ MSBUILD = "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current
 > Debug / Release **都是静态 CRT `/MT`**（`dumpbin /dependents` 只有系统 DLL），Release 体积更小
 > （约 375 KB vs 1.9 MB），反射加载验证用的是 Release。指定 `-p:OutDir=` 时 Debug/Release 建议分目录。
 
+### 静默构建（无诊断输出、无落盘文件）
+
+诊断输出与落盘由 `client/core/agent_debug.h` 的两个**编译期开关**控制，可用 MSBuild 属性覆盖：
+
+| 属性 | 默认 | 作用 |
+|---|---|---|
+| `RatAgentDebug` | `1` | `0` = 诊断宏 `AGENT_LOG(...)` 编译为空操作：**格式串不会进二进制**、不落日志、不碰 stdout |
+| `RatAgentPersistId` | 跟随 `RatAgentDebug` | `0` = `agent.id` 不落盘：身份只在内存（重启后变化），磁盘零写入 |
+
+```
+:: 静默版：无任何输出、磁盘零写入
+"%MSBUILD%" client/RatAgentDll.vcxproj -p:Configuration=Release -p:Platform=x64 -p:RatAgentDebug=0 ...
+:: 静默但保留稳定身份（只落 agent.id，不打印、不落日志）
+"%MSBUILD%" client/RatAgentDll.vcxproj -p:Configuration=Release -p:Platform=x64 -p:RatAgentDebug=0 -p:RatAgentPersistId=1 ...
+```
+
+实测（Release）：DLL 从 374,784 B 降到 351,232 B，6 条典型诊断串由 6/6 命中变为 **0/6**；
+静默版仍能上线并应答指令，且**不创建目录、不写 agent.log/agent.id**（`python scripts/e2e_quiet.py`）。
+
+> 代价：静默版重启后 `agent_id` 变化 ⇒ "重连同 ID" 与 "另一进程凭 `agent.id` 停止" 不再成立
+> （仍可按已知的 32 位 hex 触发命名事件）。跨进程停止用的命名事件 `Local\RatAgentStop.<id>`
+> 仍会创建 —— 它是内核对象，不是磁盘 IOC。
+
 产物：`client/x64/Debug/RatAgent.exe` 与 `client/x64/Debug/RatAgent.dll`。
 
 > 受限环境（无 GUI/沙箱会话）下，既有 VS 输出目录可能不可写，改用工作区内新目录：
