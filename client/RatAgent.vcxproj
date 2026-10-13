@@ -61,6 +61,8 @@
       <PreprocessorDefinitions>_CONSOLE;RAT_MODULE_ID="$(RatAgentModuleId)";RAT_MODULE_CAPS=$(RatAgentModuleCaps);RAT_AGENT_DEBUG=$(RatAgentDebug);RAT_AGENT_PERSIST_ID=$(RatAgentPersistId);_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <!-- 模块工程自己的 caps.cpp 不在 core 目录里，需要把 core 加进头文件搜索路径 -->
+      <AdditionalIncludeDirectories>$(ProjectDir)core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -77,6 +79,8 @@
       <PreprocessorDefinitions>_CONSOLE;RAT_MODULE_ID="$(RatAgentModuleId)";RAT_MODULE_CAPS=$(RatAgentModuleCaps);RAT_AGENT_DEBUG=$(RatAgentDebug);RAT_AGENT_PERSIST_ID=$(RatAgentPersistId);_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <!-- 模块工程自己的 caps.cpp 不在 core 目录里，需要把 core 加进头文件搜索路径 -->
+      <AdditionalIncludeDirectories>$(ProjectDir)core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
@@ -89,7 +93,10 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="core\main.cpp" />
+    <ClCompile Include="caps_full.cpp" />
     <ClCompile Include="core\agent_runtime.cpp" />
+    <ClCompile Include="core\capability.cpp" />
+    <ClCompile Include="core\screen_module.cpp" />
     <ClCompile Include="core\protocol.cpp" />
     <ClCompile Include="core\crypto.cpp" />
     <ClCompile Include="core\net.cpp" />
@@ -101,6 +108,8 @@
     <ClCompile Include="core\desktop_switch.cpp" />
     <ClCompile Include="core\input_replay.cpp" />
     <ClInclude Include="core\module_id.h" />
+    <ClInclude Include="core\capability.h" />
+    <ClInclude Include="core\screen_module.h" />
     <ClInclude Include="core\agent_debug.h" />
     <ClInclude Include="core\protocol.h" />
     <ClInclude Include="core\agent_runtime.h" />

