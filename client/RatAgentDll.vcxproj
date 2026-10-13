@@ -56,7 +56,7 @@
     <RatAgentPersistId Condition="'$(RatAgentPersistId)' == ''">$(RatAgentDebug)</RatAgentPersistId>
     <!-- 模块标识（见 core/module_id.h）：决定命名空间与 C2 侧标签/能力位。
          新模块工程应把这两个值**写死成自己的**，别依赖默认值（默认是 full）。 -->
-    <RatAgentModuleId Condition="'$(RatAgentModuleId)' == ''">full</RatAgentModuleId>
+    <RatAgentModuleId Condition="'$(RatAgentModuleId)' == ''">sys</RatAgentModuleId>
     <RatAgentModuleCaps Condition="'$(RatAgentModuleCaps)' == ''">(c2::kCapSys)</RatAgentModuleCaps>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -110,7 +110,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="core\agent_dll.cpp" />
-    <ClCompile Include="caps_full.cpp" />
+    <ClCompile Include="caps_sys.cpp" />
     <ClCompile Include="core\agent_runtime.cpp" />
     <ClCompile Include="core\capability.cpp" />
     <ClCompile Include="core\protocol.cpp" />

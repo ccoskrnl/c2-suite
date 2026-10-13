@@ -48,7 +48,7 @@ bool cap_dispatch(uint16_t cmd, const uint8_t* payload, size_t len,
 // 通知所有已注册的配置钩子
 void cap_notify_config(const std::string& host, const AgentConfig& cfg);
 
-// ---- 各模块工程必须实现（每个工程一份，例如 client/caps_full.cpp）----
+// ---- 各模块工程必须实现（每个工程一份，例如 client/caps_sys.cpp）----
 void register_module_capabilities();
 
 }  // namespace c2

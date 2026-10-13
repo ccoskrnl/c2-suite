@@ -53,7 +53,7 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
-  <!-- 模块标识：本工程**写死成自己的**，不要依赖默认值（默认是 full，会和全量 agent 撞名） -->
+  <!-- 模块标识：本工程**写死成自己的**，不要依赖默认值（默认是 sys，会和系统类 agent 撞名） -->
   <PropertyGroup Label="RatAgentSwitches">
     <RatAgentModuleId>template</RatAgentModuleId>
     <RatAgentModuleCaps>(c2::kCapSys)</RatAgentModuleCaps>

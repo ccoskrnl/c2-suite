@@ -1,14 +1,14 @@
 # e2e_screen.py — 阶段 2 验收：远程桌面拆成独立 agent
 #
 # 验证：
-#   1) full 与 screen **两个模块同机共存**：各自命名空间、各自标签/能力位
+#   1) sys 与 screen **两个模块同机共存**：各自命名空间、各自标签/能力位
 #   2) screen 模块**直连 C2** 并独立提供远程桌面指令：
 #        0x1001 截屏（GDI+WIC 经能力注册表）→ 合法 JPEG
 #        0x1002 屏幕流 开/停（ratctl raw / stop）
-#   3) full 模块**已不再包含**屏幕指令（0x1001 返回未知指令 status=1）
+#   3) sys 模块**已不再包含**屏幕指令（0x1001 返回未知指令 status=1）
 #
 # 前置：
-#   build/agent-full/bin/RatAgent.exe          ← 全量模块（module=full）
+#   build/agent-sys/bin/RatAgent.exe           ← 系统类模块（module=sys）
 #   build/agents/screen/exe/RatAgent.screen.exe ← 屏幕模块（module=screen）
 #   build/bin/c2server.exe / ratctl.exe
 import os
@@ -21,7 +21,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 C2 = os.path.join(ROOT, "build", "bin", "c2server.exe")
 RATCTL = os.path.join(ROOT, "build", "bin", "ratctl.exe")
-FULL = os.path.join(ROOT, "build", "agent-full", "bin", "RatAgent.exe")
+SYS = os.path.join(ROOT, "build", "agent-sys", "bin", "RatAgent.exe")
 SCREEN = os.path.join(ROOT, "build", "agents", "screen", "exe", "RatAgent.screen.exe")
 WORK = os.path.join(ROOT, "build", "e2e", "screen")
 C2_LOG = os.path.join(WORK, "c2server.log")
@@ -94,26 +94,26 @@ class Shell:
 
 
 def main():
-    for p in (C2, RATCTL, FULL, SCREEN):
+    for p in (C2, RATCTL, SYS, SCREEN):
         check(f"prereq {os.path.relpath(p, ROOT)}", os.path.exists(p))
     if not ok:
         print("== RESULT: PREREQ MISSING")
         return 1
 
     shutil.rmtree(WORK, ignore_errors=True)
-    dir_full = os.path.join(WORK, "run-full")
+    dir_sys = os.path.join(WORK, "run-full")
     dir_screen = os.path.join(WORK, "run-screen")
-    os.makedirs(dir_full, exist_ok=True)
+    os.makedirs(dir_sys, exist_ok=True)
     os.makedirs(dir_screen, exist_ok=True)
 
-    srv = a_full = a_screen = sh = sh_stream = None
+    srv = a_sys = a_screen = sh = sh_stream = None
     try:
         with open(C2_LOG, "w", encoding="utf-8", errors="replace") as f:
             srv = subprocess.Popen([C2], stdout=f, stderr=subprocess.STDOUT)
         time.sleep(1)
         dn = subprocess.DEVNULL
-        a_full = subprocess.Popen([FULL, "127.0.0.1", "4444", "-tcp"],
-                                  cwd=dir_full, stdout=dn, stderr=dn)
+        a_sys = subprocess.Popen([SYS, "127.0.0.1", "4444", "-tcp"],
+                                  cwd=dir_sys, stdout=dn, stderr=dn)
         a_screen = subprocess.Popen([SCREEN, "127.0.0.1", "4444", "-tcp"],
                                     cwd=dir_screen, stdout=dn, stderr=dn)
 
@@ -127,16 +127,16 @@ def main():
         check("两个模块都上线", len(ids) >= 2, f"online={len(ids)}")
 
         # 1) 命名空间与标签
-        check("full 生成 full.id", os.path.exists(os.path.join(dir_full, "full.id")))
+        check("sys 生成 sys.id", os.path.exists(os.path.join(dir_sys, "sys.id")))
         check("screen 生成 screen.id", os.path.exists(os.path.join(dir_screen, "screen.id")))
         check("两个模块 id 不同", len({i for i, _ in ids}) >= 2)
-        check("full 标签", 'os="Windows (full)"' in log and "plugins=0x00000001" in log)
+        check("sys 标签", 'os="Windows (sys)"' in log and "plugins=0x00000001" in log)
         check("screen 标签", 'os="Windows (screen)"' in log and "plugins=0x00000002" in log)
 
         sid = next((i for i, l in ids if "(screen)" in l), "")
-        fid = next((i for i, l in ids if "(full)" in l), "")
-        check("识别出 screen / full 两个会话", bool(sid) and bool(fid), f"{sid[:8]} / {fid[:8]}")
-        if not (sid and fid):
+        sysid = next((i for i, l in ids if "(sys)" in l), "")
+        check("识别出 screen / sys 两个会话", bool(sid) and bool(sysid), f"{sid[:8]} / {sysid[:8]}")
+        if not (sid and sysid):
             raise SystemExit(1)
 
         sh = Shell()   # 干净会话：不发起屏幕流，因此不会收到 4445 转发的帧
@@ -182,19 +182,19 @@ def main():
             time.sleep(0.5)
         check("停流后 4445 连接被移除", "removed stream connection" in read(C2_LOG))
 
-        # 7) full 模块：屏幕指令**已移除**（同样用模块标签切换）
-        out = sh.send(["use full", "raw 1001"], 10)
-        check("full 模块已无 0x1001（未知指令 status=0x01）",
+        # 7) sys 模块：屏幕指令**已移除**（同样用模块标签切换）
+        out = sh.send(["use sys", "raw 1001"], 10)
+        check("sys 模块已无 0x1001（未知指令 status=0x01）",
               "status : 0x01" in out, repr(out[-120:]))
         out = sh.send(["raw 1002 01"], 10)
-        check("full 模块已无 0x1002（未知指令 status=0x01）",
+        check("sys 模块已无 0x1002（未知指令 status=0x01）",
               "status : 0x01" in out, repr(out[-120:]))
     finally:
         if sh:
             sh.close()
         if sh_stream:
             sh_stream.close()
-        for proc in (a_full, a_screen):
+        for proc in (a_sys, a_screen):
             if proc and proc.poll() is None:
                 proc.kill()
                 try:

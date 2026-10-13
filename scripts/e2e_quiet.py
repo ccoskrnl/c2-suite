@@ -101,9 +101,9 @@ def main():
         # 4) 磁盘零写入
         check("未创建 %LOCALAPPDATA%\\RatAgent 目录", not os.path.exists(HOME_Q), HOME_Q)
         check("未生成 <module>.log",
-              not os.path.exists(os.path.join(HOME_Q, "RatAgent", "full.log")))
+              not os.path.exists(os.path.join(HOME_Q, "RatAgent", "sys.log")))
         check("未生成 <module>.id",
-              not os.path.exists(os.path.join(HOME_Q, "RatAgent", "full.id")))
+              not os.path.exists(os.path.join(HOME_Q, "RatAgent", "sys.id")))
     finally:
         if runpic and runpic.poll() is None:
             runpic.kill()

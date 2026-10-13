@@ -340,11 +340,11 @@ runpic 宿主自身输出仍在而 **agent 诊断行 0 条**、`%LOCALAPPDATA%\R
 
 | 项 | 规则 |
 |---|---|
-| 模块名 | [client/core/module_id.h](../client/core/module_id.h) 的 `RAT_MODULE_ID`（编译期，默认 `full`） |
+| 模块名 | [client/core/module_id.h](../client/core/module_id.h) 的 `RAT_MODULE_ID`（编译期，默认 `sys`；阶段 0 时叫 `full`，见 §9.5） |
 | 身份/日志/自启 | `%LOCALAPPDATA%\RatAgent\<module>.id` / `<module>.log` / `<module>.autostart.args`；EXE 形态为 CWD 下的 `<module>.id` |
 | 停止事件 | `Local\RatAgentStop.<agent_id_hex>` —— **刻意不加模块前缀**：各模块 id 随机不撞名，这样**任一模块**的 DLL 导出 Stop 都能停**任意模块**的实例（加了前缀反而只能停自己） |
 | C2 侧标签 | 握手 `os_info` = `Windows (<module>)`；能力位 `Session.Plugins`（bit0 系统类 / bit1 远程桌面） |
-| 构建 | `-p:RatAgentModuleId=…` / `-p:RatAgentModuleCaps=…`（MSBuild 属性，默认 full） |
+| 构建 | `-p:RatAgentModuleId=…` / `-p:RatAgentModuleCaps=…`（MSBuild 属性，默认 `sys`） |
 
 **实测证据**（`python scripts/e2e_modules.py` = **ALL PASS**；同一工程编两次 → `full` + `probe` 并发）：
 两个模块各自生成自己的 id 文件、互不串名；两个会话都在线且 agent_id 不同；
@@ -428,3 +428,24 @@ runpic 宿主自身输出仍在而 **agent 诊断行 0 条**、`%LOCALAPPDATA%\R
 - 让 `screen` 模块也支持"注入/反射加载"交付（它已经是标准模块，可用 `tools/runpic` + RfUdrl 链 PIC）；
 - beacon 信道的模块标签（需一次小的协议补充，见 §9.1 已知缺口）；
 - 若不再需要"父模块管生命周期"，可评估阶段 5 的 IPC/hub 化（当前形态：模块各自直连 C2）。
+
+### 9.5 模块改名：`full` → `sys`（✅ 完成）
+
+阶段 2 把远程桌面拆走后，"全量"模块只剩**系统类**能力（sysinfo / exec / payload），名字与能力
+不符，故按实际能力改名为 **`sys`**（与能力位 `kCapSys`、协议系统段 `0x3xxx` 一致）。
+
+改动面（已全部同步）：
+
+| 位置 | 改动 |
+|---|---|
+| `client/core/module_id.h` | `RAT_MODULE_ID` 默认值 → `"sys"` |
+| `client/RatAgent.vcxproj` / `RatAgentDll.vcxproj` | `RatAgentModuleId` 默认值 → `sys` |
+| `client/caps_full.cpp` → `client/caps_sys.cpp` | 能力清单文件改名（`git mv`，历史保留） |
+| `scripts/e2e_*.py` | 模块名 / 文件名 / 标签断言 / 构建目录（`build/agent-full` → `build/agent-sys`） |
+| README / DESIGN / 模板工程注释 | 同步为 `sys` |
+
+**实测**：五个验收脚本全绿（`e2e_modules` / `e2e_template` / `e2e_screen` / `e2e_rdll` / `e2e_quiet`）；
+命名空间文件变为 `sys.id` / `sys.log` / `sys.autostart.args`，C2 侧标签 `Windows (sys)`。
+
+> 注意：§9.1–§9.3 的**实测记录**里模块名写的是当时的 `full`（以及 `Windows (full)`、`full.id` 等），
+> 与今天的 `sys` 是同一个模块；**规则与用法一律以 `sys` 为准**。

@@ -357,7 +357,7 @@ python scripts/e2e_m3.py   # beacon 轮询 + 交互式 ratctl
   存在即自启动，删除该文件才会关闭；DLL 不自动删（避免误删）
 - **DLL 形态默认落盘位置**：`%LOCALAPPDATA%\RatAgent\`（`<module>.id` / `<module>.log`），
   可用 `id=`/`log=` 覆盖；EXE 形态仍用 CWD 下的 `<module>.id`（保持历史行为）
-- **`<module>` 是模块命名空间前缀**（`client/core/module_id.h`，默认 `full`）：同机多模块共存时
+- **`<module>` 是模块命名空间前缀**（`client/core/module_id.h`，默认 `sys`）：同机多模块共存时
   身份/日志/自启文件必须分开，否则服务器按 `agent_id` 索引会互相踢下线（见 PROGRESS §9.1）
 - **信道语义**：未知指令两信道一致（都回 `CMD_RESULT(status=1)`）；
   beacon 结果块允许零长度结果（`decodeResults` 用 `io.ReadFull`，`ln==0` 不读）

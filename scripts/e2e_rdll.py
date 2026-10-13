@@ -30,9 +30,9 @@ RUNPIC = os.path.join(ROOT, "build", "runpic", "bin", "runpic.exe")
 C2 = os.path.join(ROOT, "build", "bin", "c2server.exe")
 RATCTL = os.path.join(ROOT, "build", "bin", "ratctl.exe")
 DLL = os.path.join(ROOT, "build", "dll-release", "bin", "RatAgent.dll")  # Release 形态
-# 模块名必须与 DLL 的 RatAgentModuleId 一致(默认 full)——它决定 id/日志/自启文件的文件名
+# 模块名必须与 DLL 的 RatAgentModuleId 一致(默认 sys)——它决定 id/日志/自启文件的文件名
 # (见 client/core/module_id.h)
-MODULE = "full"
+MODULE = "sys"
 WORK = os.path.join(ROOT, "build", "e2e")
 AGENT_ID = os.path.join(WORK, f"{MODULE}.id")
 AGENT_LOG = os.path.join(WORK, f"{MODULE}.log")
@@ -276,7 +276,7 @@ def main():
         # 截屏/屏幕流（0x1001/0x1002）已在模块化阶段 2 移到 screen 模块，
         # full 不再提供；这里改为验证"确实没有"，能力覆盖见 scripts/e2e_screen.py
         out4 = sh.send(["raw 1001"], 10)
-        check("full 已无 0x1001（阶段2 拆到 screen 模块）",
+        check("sys 已无 0x1001（阶段2 拆到 screen 模块）",
               "status : 0x01" in out4, repr(out4[-90:]))
         sh.close()
         sh = None
