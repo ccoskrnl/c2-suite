@@ -48,6 +48,10 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <!-- 中间目录按工程名分开：见 RatAgent.vcxproj 里的同一段说明 -->
+  <PropertyGroup>
+    <IntDir>$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
   <!-- 诊断/落盘开关（可命令行覆盖）：默认 1/1 = 既有行为。见 core/agent_debug.h
        例：-p:RatAgentDebug=0                      → 静默（无输出、无文件）
            -p:RatAgentDebug=0 -p:RatAgentPersistId=1 → 静默但保留稳定身份（只落 id） -->
@@ -72,14 +76,14 @@
       <Optimization>Disabled</Optimization>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <!-- 与 EXE 工程默认输出到同一目录：分离 PDB/ILK，避免互相覆盖 -->
-      <ProgramDataBaseFileName>$(OutDir)RatAgentDll.pdb</ProgramDataBaseFileName>
+      <ProgramDataBaseFileName>$(OutDir)RatAgent.dll.pdb</ProgramDataBaseFileName>
       <TreatWarningAsError>false</TreatWarningAsError>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>$(OutDir)RatAgentDll.pdb</ProgramDatabaseFile>
-      <ImportLibrary>$(OutDir)RatAgentDll.lib</ImportLibrary>
+      <ProgramDatabaseFile>$(OutDir)RatAgent.dll.pdb</ProgramDatabaseFile>
+      <ImportLibrary>$(OutDir)RatAgent.lib</ImportLibrary>
       <LinkIncremental>false</LinkIncremental>
       <AdditionalDependencies>ws2_32.lib;bcrypt.lib;winhttp.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
@@ -96,15 +100,15 @@
       <!-- 模块工程自己的 caps.cpp 不在 core 目录里，需要把 core 加进头文件搜索路径 -->
       <AdditionalIncludeDirectories>$(ProjectDir)core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <ProgramDataBaseFileName>$(OutDir)RatAgentDll.pdb</ProgramDataBaseFileName>
+      <ProgramDataBaseFileName>$(OutDir)RatAgent.dll.pdb</ProgramDataBaseFileName>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>$(OutDir)RatAgentDll.pdb</ProgramDatabaseFile>
-      <ImportLibrary>$(OutDir)RatAgentDll.lib</ImportLibrary>
+      <ProgramDatabaseFile>$(OutDir)RatAgent.dll.pdb</ProgramDatabaseFile>
+      <ImportLibrary>$(OutDir)RatAgent.lib</ImportLibrary>
       <AdditionalDependencies>ws2_32.lib;bcrypt.lib;winhttp.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>

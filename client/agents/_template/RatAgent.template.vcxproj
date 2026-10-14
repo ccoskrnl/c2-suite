@@ -53,6 +53,10 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <!-- 中间目录按工程名分开：EXE 与 DLL 工程编译同一批源码但宏不同，共用会互相覆盖 .obj -->
+  <PropertyGroup>
+    <IntDir>$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
   <!-- 模块标识：本工程**写死成自己的**，不要依赖默认值（默认是 sys，会和系统类 agent 撞名） -->
   <PropertyGroup Label="RatAgentSwitches">
     <RatAgentModuleId>template</RatAgentModuleId>
@@ -72,13 +76,13 @@
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <Optimization>Disabled</Optimization>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <ProgramDataBaseFileName>$(OutDir)RatAgent.template.pdb</ProgramDataBaseFileName>
+      <ProgramDataBaseFileName>$(OutDir)RatAgent.template.dll.pdb</ProgramDataBaseFileName>
       <TreatWarningAsError>false</TreatWarningAsError>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>$(OutDir)RatAgent.template.pdb</ProgramDatabaseFile>
+      <ProgramDatabaseFile>$(OutDir)RatAgent.template.dll.pdb</ProgramDatabaseFile>
       <ImportLibrary>$(OutDir)RatAgent.template.lib</ImportLibrary>
       <LinkIncremental>false</LinkIncremental>
       <!-- 模板不带屏幕能力，因此不需要 windowscodecs（WIC） -->
@@ -96,14 +100,14 @@
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <AdditionalIncludeDirectories>$(ProjectDir)..\..\core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <ProgramDataBaseFileName>$(OutDir)RatAgent.template.pdb</ProgramDataBaseFileName>
+      <ProgramDataBaseFileName>$(OutDir)RatAgent.template.dll.pdb</ProgramDataBaseFileName>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>$(OutDir)RatAgent.template.pdb</ProgramDatabaseFile>
+      <ProgramDatabaseFile>$(OutDir)RatAgent.template.dll.pdb</ProgramDatabaseFile>
       <ImportLibrary>$(OutDir)RatAgent.template.lib</ImportLibrary>
       <AdditionalDependencies>ws2_32.lib;bcrypt.lib;winhttp.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>

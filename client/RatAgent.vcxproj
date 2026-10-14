@@ -43,6 +43,12 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <!-- 中间目录按工程名分开：EXE 与 DLL 工程编译同一批 core 源码但宏不同
+       (_CONSOLE vs _USRDLL/RAT_AGENT_DLL)，共用中间目录会在解决方案级构建里互相
+       覆盖 .obj，静默产出错误二进制（例如 DLL 用上按 EXE 语义编的 agent_runtime.obj） -->
+  <PropertyGroup>
+    <IntDir>$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
+  </PropertyGroup>
   <!-- 诊断/落盘开关（可命令行覆盖）：默认 1/1 = 既有行为。见 core/agent_debug.h
        例：-p:RatAgentDebug=0                      → 静默（无输出、无文件）
            -p:RatAgentDebug=0 -p:RatAgentPersistId=1 → 静默但保留稳定身份（只落 id） -->
@@ -63,10 +69,14 @@
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <!-- 模块工程自己的 caps.cpp 不在 core 目录里，需要把 core 加进头文件搜索路径 -->
       <AdditionalIncludeDirectories>$(ProjectDir)core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <!-- 符号文件与产物同名同目录（<产物>.pdb）：解决方案级构建时 6 个产物落在同一
+           输出目录，EXE 与 DLL 工程若用同名 PDB 会互相覆盖调试符号 -->
+      <ProgramDataBaseFileName>$(OutDir)RatAgent.exe.pdb</ProgramDataBaseFileName>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(OutDir)RatAgent.exe.pdb</ProgramDatabaseFile>
       <AdditionalDependencies>ws2_32.lib;bcrypt.lib;winhttp.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
@@ -82,12 +92,14 @@
       <!-- 模块工程自己的 caps.cpp 不在 core 目录里，需要把 core 加进头文件搜索路径 -->
       <AdditionalIncludeDirectories>$(ProjectDir)core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <ProgramDataBaseFileName>$(OutDir)RatAgent.exe.pdb</ProgramDataBaseFileName>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(OutDir)RatAgent.exe.pdb</ProgramDatabaseFile>
       <AdditionalDependencies>ws2_32.lib;bcrypt.lib;winhttp.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>

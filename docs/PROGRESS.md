@@ -449,3 +449,35 @@ runpic 宿主自身输出仍在而 **agent 诊断行 0 条**、`%LOCALAPPDATA%\R
 
 > 注意：§9.1–§9.3 的**实测记录**里模块名写的是当时的 `full`（以及 `Windows (full)`、`full.id` 等），
 > 与今天的 `sys` 是同一个模块；**规则与用法一律以 `sys` 为准**。
+
+### 9.6 解决方案结构 + 工程构建隔离（✅ 完成）
+
+**起因**：在 VS2026 里打开解决方案时发现"根本看不出项目结构"，排查后确认三个问题：
+
+| # | 问题 | 后果 |
+|---|---|---|
+| 1 | `RatAgent.sln` 里只有 2 个工程，screen/template 模块工程**从未加入** | 打开看不到多模块结构 |
+| 2 | 6 个工程**都没设 `IntDir`** | 同一模块的 EXE/DLL 工程共用中间目录，而它们编译同一批 core 源码却用不同宏（`_CONSOLE` vs `_USRDLL/RAT_AGENT_DLL`）→ `.obj` 互相覆盖，**静默产出错误二进制**（例如 DLL 用上按 EXE 语义编的 `agent_runtime.obj`，默认 id 路径会变成 CWD 相对） |
+| 3 | screen/template 的 EXE 与 DLL 工程用**同名 PDB** | 解决方案级构建时 6 个产物落同一输出目录，调试符号互相覆盖 |
+
+**改动**
+- `client/RatAgent.sln` → **`client/agents.sln`**：6 个工程按模块分到 `sys` / `screen` / `template`
+  解决方案文件夹；另加 `core (shared)`（共享内核入口文件，说明它**没有独立工程**、被编进每个模块）
+  与 `docs` 两个导航文件夹；工程显示名带形态（`RatAgent (exe)` / `RatAgentDll (dll)` /
+  `RatAgent.screen (exe)` / `RatAgent.screen (dll)` …）。
+- 6 个工程各加 `IntDir = $(ProjectName)\$(Platform)\$(Configuration)\`（互不相同的中间目录）。
+- 符号文件与产物同名：`RatAgent.exe.pdb` / `RatAgent.dll.pdb` / `RatAgent.screen.exe.pdb` /
+  `RatAgent.screen.dll.pdb` / `RatAgent.template.exe.pdb` / `RatAgent.template.dll.pdb`；
+  导入库 `RatAgent.lib` / `RatAgent.screen.lib` / `RatAgent.template.lib`。
+
+**实测**
+- `MSBuild client\agents.sln -p:Configuration=Release -p:Platform=x64` → **exit=0，6 个工程全部产出**
+  到 `client\x64\Release\`；
+- `dumpbin /exports client\x64\Release\RatAgent.dll` → 导出 `StartAgent/StopAgent/StopAgentEx`
+  ⇒ 确为真正的 DLL 构建，**未被 EXE 语义的 obj 污染**（IntDir 隔离生效）；
+- 解决方案构建出的 `RatAgent.screen.exe` 实测上线：`os="Windows (screen)" plugins=0x00000002`；
+- `client/x64/` 已被 `.gitignore` 覆盖，构建产物不会进仓库。
+
+**未做（等指示）**：工程文件名仍是 `RatAgent.vcxproj` / `RatAgentDll.vcxproj`。改名更自解释
+（如 `RatAgent.sys.exe.vcxproj` / `RatAgent.sys.vcxproj`），但会牵动文档与脚本，且此前整体回退过一次，
+故留待确认。

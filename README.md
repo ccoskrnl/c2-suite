@@ -31,10 +31,10 @@ c2/
 │   └── internal/session/      # 会话注册表（离线/回收）
 ├── ctl/                       # Go CLI
 │   └── cmd/ratctl/            # 交互式 shell（会话/系统/截屏/远控/payload）
-├── client/                    # C++ Agent（VS 解决方案：EXE + DLL 两个工程）
-│   ├── RatAgent.sln
-│   ├── RatAgent.vcxproj       # → RatAgent.exe（控制台形态）
-│   ├── RatAgentDll.vcxproj    # → RatAgent.dll（rundll32 / 宿主 / 注入；静态 CRT）
+├── client/                    # C++ Agent（多模块解决方案：sys / screen / template）
+│   ├── agents.sln             # VS 打开这个：模块分组，core(共享)/docs 有独立文件夹
+│   ├── RatAgent.vcxproj       # sys 模块 → RatAgent.exe（控制台形态）
+│   ├── RatAgentDll.vcxproj    # sys 模块 → RatAgent.dll（rundll32 / 宿主 / 注入；静态 CRT）
 │   ├── caps_sys.cpp           # "sys"模块的能力清单（每个模块工程一份）
 │   ├── agents/_template/      # **模块工程模板**：复制它开新模块（见其 README）
 │   ├── agents/screen/         # "screen"（远程桌面）模块：抓屏/屏幕流/输入回放/桌面切换
@@ -44,8 +44,12 @@ c2/
 ├── viewer/                    # C++ Win32 远控查看器（独立 CMake 工程）
 ├── im_ctl/                    # C++ ImGui 控制端
 ├── tools/runpic/              # PIC blob 执行器（反射加载验证 harness，配合外部 loader）
-└── scripts/                   # e2e_m1~m4 + e2e_rdll/e2e_quiet/e2e_modules/e2e_caps/e2e_template
+└── scripts/                   # e2e_m1~m4 + e2e_rdll/e2e_quiet/e2e_modules/e2e_screen/e2e_template
 ```
+
+> **解决方案结构**（在 VS 里看到的树）：`core (shared)` 放共享内核的入口文件（它没有独立工程，
+> 被编进每个模块）、`docs` 放文档、然后每个模块一个文件夹（`sys` / `screen` / `template`），
+> 每个文件夹里是同一模块的 **EXE 形态** + **DLL 形态**两个工程。
 
 ## 构建
 
@@ -57,14 +61,24 @@ go build -o bin/ratctl.exe    ./ctl/cmd/ratctl
 go test ./...                 # 协议单测（含测试向量验证）
 ```
 
-**C++ Agent**（VS2022/18，v145 工具集）：用 VS 打开 `client/RatAgent.sln`（含两个工程），
-或命令行分别生成：
+**C++ Agent**（VS2022/18，v145 工具集）：用 VS 打开 `client/agents.sln`
+（sys / screen / template 三个模块，每个模块 EXE + DLL 两个工程），或命令行生成：
 
 ```
 MSBUILD = "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/amd64/MSBuild.exe"
+# 整个解决方案（6 个工程：sys/screen/template 各 EXE+DLL），产物统一落 client/x64/<Config>/
+"%MSBUILD%" client/agents.sln -p:Configuration=Release -p:Platform=x64
+
+# 或单独编某个工程
 "%MSBUILD%" client/RatAgent.vcxproj    -p:Configuration=Debug -p:Platform=x64   # → RatAgent.exe
 "%MSBUILD%" client/RatAgentDll.vcxproj -p:Configuration=Debug -p:Platform=x64   # → RatAgent.dll
 ```
+
+> 通过解决方案构建时，6 个产物都落在 `client/x64/<Config>/`，**符号文件与产物同名**
+> （`RatAgent.dll` 配 `RatAgent.dll.pdb`、`RatAgent.screen.exe` 配 `RatAgent.screen.exe.pdb`），
+> 不会互相覆盖。每个工程有**自己的中间目录**（`<工程名>/x64/<Config>/`）：EXE 与 DLL 工程编译
+> 同一批 core 源码但宏不同（`_CONSOLE` vs `_USRDLL`），共用中间目录会导致 `.obj` 互相覆盖、
+> 静默产出错误二进制。
 
 > Debug / Release **都是静态 CRT `/MT`**（`dumpbin /dependents` 只有系统 DLL），Release 体积更小
 > （约 375 KB vs 1.9 MB），反射加载验证用的是 Release。指定 `-p:OutDir=` 时 Debug/Release 建议分目录。
