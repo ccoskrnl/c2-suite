@@ -8,7 +8,7 @@
 #   3) sys 模块**已不再包含**屏幕指令（0x1001 返回未知指令 status=1）
 #
 # 前置：
-#   build/agent-sys/bin/RatAgent.exe           ← 系统类模块（module=sys）
+#   build/agent-sys/bin/RatAgent.sys.exe       ← 系统类模块（module=sys）
 #   build/agents/screen/exe/RatAgent.screen.exe ← 屏幕模块（module=screen）
 #   build/bin/c2server.exe / ratctl.exe
 import os
@@ -21,7 +21,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 C2 = os.path.join(ROOT, "build", "bin", "c2server.exe")
 RATCTL = os.path.join(ROOT, "build", "bin", "ratctl.exe")
-SYS = os.path.join(ROOT, "build", "agent-sys", "bin", "RatAgent.exe")
+SYS = os.path.join(ROOT, "build", "agent-sys", "bin", "RatAgent.sys.exe")
 SCREEN = os.path.join(ROOT, "build", "agents", "screen", "exe", "RatAgent.screen.exe")
 WORK = os.path.join(ROOT, "build", "e2e", "screen")
 C2_LOG = os.path.join(WORK, "c2server.log")

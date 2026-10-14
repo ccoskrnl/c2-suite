@@ -10,8 +10,8 @@
 三端、三条信道：
 
 ```
-┌─ RatAgent.exe / RatAgent.dll (C++) ─────────────────┐
-│  同一套 core，两种产物；默认 beacon，-tcp 切长连接     │
+┌─ RatAgent.<module>.exe / .dll (C++) ───────────────┐
+│  同一套 core，多个模块产物；默认 beacon，-tcp 切长连接 │
 │  ├ agent_runtime（共用运行核心：启停/路径/停止事件）    │
 │  ├ net / protocol / crypto / session                │
 │  ├ cmd_dispatch（命令分发中心：SYS_INFO/EXEC_PS/...） │
@@ -162,11 +162,16 @@
 
 | 形态 | 工程 | 入口 | 适用场景 | 身份/日志 |
 |---|---|---|---|---|
-| `RatAgent.exe` | `RatAgent.vcxproj` | `main()` | 独立进程部署、调试 | CWD 下 `<module>.id`；stdout |
-| `RatAgent.dll` | `RatAgentDll.vcxproj` | 导出函数 + `DllMain` | rundll32 / 宿主 LoadLibrary / 注入 | `%LOCALAPPDATA%\RatAgent\<module>.id` + `<module>.log`（`id=`/`log=` 可覆盖） |
+| `RatAgent.<module>.exe` | `RatAgent.<module>.exe.vcxproj` | `main()` | 独立进程部署、调试 | CWD 下 `<module>.id`；stdout |
+| `RatAgent.<module>.dll` | `RatAgent.<module>.vcxproj` | 导出函数 + `DllMain` | rundll32 / 宿主 LoadLibrary / 注入 | `%LOCALAPPDATA%\RatAgent\<module>.id` + `<module>.log`（`id=`/`log=` 可覆盖） |
+
+> 例（sys 模块）：`RatAgent.sys.exe` ← `client/RatAgent.sys.exe.vcxproj`、
+> `RatAgent.sys.dll` ← `client/RatAgent.sys.vcxproj`。
 
 > 两个工程默认输出到同一目录（`client\x64\<Config>\`）也**不会互相覆盖**：
-> DLL 工程的 PDB/导入库已分离为 `RatAgentDll.pdb` / `RatAgentDll.lib`，并关闭了 `.ilk` 增量链接。
+> 符号文件与导入库按产物命名（`RatAgent.sys.exe.pdb` / `RatAgent.sys.dll.pdb` / `RatAgent.sys.lib`），
+> 且每个工程有**自己的中间目录**（`<工程名>\x64\<Config>\`）——EXE 与 DLL 工程编译同一批 core 源码
+> 但宏不同（`_CONSOLE` vs `_USRDLL`），共用中间目录会导致 `.obj` 互相覆盖、静默产出错误二进制。
 
 DLL 侧关键设计（三处踩坑点）：
 
@@ -277,9 +282,11 @@ GO="C:/Users/202603/.g/go/bin/go.exe"
 "$GO" build -o bin/c2server.exe ./server/cmd/c2server
 "$GO" build -o bin/ratctl.exe ./ctl/cmd/ratctl
 "$GO" build -o bin/ctl_stream_probe.exe ./scripts/ctl_stream_probe
-# Agent：EXE 与 DLL 两个工程（共享同一批 core 源码）
-MSBUILD ... client/RatAgent.vcxproj    -p:Configuration=Debug -p:Platform=x64   # RatAgent.exe
-MSBUILD ... client/RatAgentDll.vcxproj -p:Configuration=Debug -p:Platform=x64   # RatAgent.dll（/MT）
+# 整个解决方案（sys / screen / template，各 EXE+DLL）
+MSBUILD ... client/agents.sln -p:Configuration=Debug -p:Platform=x64
+# 或单独编 sys 模块的两个工程（共享同一批 core 源码）
+MSBUILD ... client/RatAgent.sys.exe.vcxproj -p:Configuration=Debug -p:Platform=x64   # RatAgent.sys.exe
+MSBUILD ... client/RatAgent.sys.vcxproj     -p:Configuration=Debug -p:Platform=x64   # RatAgent.sys.dll（/MT）
 # im_ctl（CMake）
 cmake --build im_ctl/build --config Debug
 # viewer（CMake，独立工程；输出 <build>/bin/viewer.exe）
@@ -289,7 +296,7 @@ cmake -S viewer -B viewer/build && cmake --build viewer/build --config Debug
 > 无 GUI/受限环境下（例如沙箱会话）可把构建输出改到工作区内新目录，避开已存在的
 > VS 输出目录（其 ACL 可能禁止写入）：
 > ```bash
-> MSBUILD client/RatAgent.vcxproj -p:Configuration=Debug -p:Platform=x64 \
+> MSBUILD client/RatAgent.sys.exe.vcxproj -p:Configuration=Debug -p:Platform=x64 \
 >   -p:IntDir=<repo>/build/agent/obj/ -p:OutDir=<repo>/build/agent/bin/
 > GOCACHE=<repo>/.gocache go build -o build/bin/ratctl.exe ./ctl/cmd/ratctl
 > cmake -S viewer -B build/viewer && cmake --build build/viewer --config Debug
@@ -306,6 +313,7 @@ python scripts/e2e_m3.py   # beacon 轮询 + 交互式 ratctl
 ### 8.1 人工端到端验证记录（beacon agent + ratctl + viewer）
 
 环境：`c2server.exe` + `RatAgent.exe 127.0.0.1 8080 -s 5`（beacon 信道）+ `ratctl`（脚本化 stdin）。
+（记录于产物改名前；当时的 `RatAgent.exe` = 现在的 `RatAgent.sys.exe`。）
 
 | 项 | 命令 | 结果 |
 |---|---|---|
@@ -320,6 +328,10 @@ python scripts/e2e_m3.py   # beacon 轮询 + 交互式 ratctl
 | 踢下线 | `kill <id>` | ✅ 返回 OK（beacon 会话无 TCP 可关，见 §9） |
 
 ### 8.2 Agent 双产物（EXE/DLL）验证记录
+
+> 下表是**产物改名前**的记录：当时为 `RatAgent.exe` / `RatAgent.dll`（工程 `RatAgent.vcxproj` /
+> `RatAgentDll.vcxproj`），现在对应 `RatAgent.sys.exe` / `RatAgent.sys.dll`（工程
+> `RatAgent.sys.exe.vcxproj` / `RatAgent.sys.vcxproj`）。结论本身不受改名影响。
 
 | 场景 | 做法 | 结果 |
 |---|---|---|

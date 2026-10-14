@@ -10,8 +10,8 @@
 # 只走 TCP 长连接的 HELLO —— 模块标签在 beacon 上是个已知缺口（待单独补协议）。
 #
 # 前置（同一工程编两次）：
-#   build/agent-sys/bin/RatAgent.exe     ← 默认（module=sys,  caps=sys  = 0x1）
-#   build/agent-probe/bin/RatAgent.exe   ← -p:RatAgentModuleId=probe -p:RatAgentModuleCaps=(c2::kCapRemote)  = 0x2
+#   build/agent-sys/bin/RatAgent.sys.exe     ← 默认（module=sys,  caps=sys  = 0x1）
+#   build/agent-probe/bin/RatAgent.probe.exe ← -p:RatAgentModuleId=probe -p:TargetName=RatAgent.probe -p:RatAgentModuleCaps=(c2::kCapRemote)  = 0x2
 import os
 import shutil
 import subprocess
@@ -20,8 +20,8 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 C2 = os.path.join(ROOT, "build", "bin", "c2server.exe")
 RATCTL = os.path.join(ROOT, "build", "bin", "ratctl.exe")
-SYS = os.path.join(ROOT, "build", "agent-sys", "bin", "RatAgent.exe")
-PROBE = os.path.join(ROOT, "build", "agent-probe", "bin", "RatAgent.exe")
+SYS = os.path.join(ROOT, "build", "agent-sys", "bin", "RatAgent.sys.exe")
+PROBE = os.path.join(ROOT, "build", "agent-probe", "bin", "RatAgent.probe.exe")
 WORK = os.path.join(ROOT, "build", "e2e", "modules")
 C2_LOG = os.path.join(WORK, "c2server.log")
 

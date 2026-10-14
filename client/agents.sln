@@ -30,9 +30,9 @@ EndProject
 # ---- sys：系统类能力（sysinfo / exec / payload，由 core 内置处理）----
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "sys", "sys", "{7E3A1C10-2001-4B2E-9C31-000000002001}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RatAgent (exe)", "RatAgent.vcxproj", "{45A58373-311A-447F-B6D9-F3B657C03A90}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RatAgent.sys (exe)", "RatAgent.sys.exe.vcxproj", "{45A58373-311A-447F-B6D9-F3B657C03A90}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RatAgentDll (dll)", "RatAgentDll.vcxproj", "{EC689B57-7058-42C1-99D0-A092E3FDCDA3}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RatAgent.sys (dll)", "RatAgent.sys.vcxproj", "{EC689B57-7058-42C1-99D0-A092E3FDCDA3}"
 EndProject
 # ---- screen：远程桌面（抓屏 / 屏幕流 / 输入回放 / 桌面切换）----
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "screen", "screen", "{7E3A1C10-2002-4B2E-9C31-000000002002}"

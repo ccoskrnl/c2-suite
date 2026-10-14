@@ -7,7 +7,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GO = r"C:/Users/202603/.g/go/bin/go.exe"
 C2 = os.path.join(ROOT, "bin", "c2server.exe")
 RATCTL = os.path.join(ROOT, "bin", "ratctl.exe")
-AGENT = os.path.join(ROOT, "client", "x64", "Debug", "RatAgent.exe")
+AGENT = os.path.join(ROOT, "client", "x64", "Debug", "RatAgent.sys.exe")
 CPP_AGENT_ID = None  # C++ Agent 上线后动态获取（agent_id 现为随机持久化）
 PY_AGENT_ID  = "b0b1b2b3b4b5b6b7b8b9babbbcbdbebf"   # 哑 Agent id
 

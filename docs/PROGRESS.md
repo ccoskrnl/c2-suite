@@ -6,9 +6,10 @@
 ## 1. 项目概览
 
 `c2/` —— 基于《ARCHITECTURE.md》的 C2 远控系统（已按 DESIGN.md 演进）：
-- **Agent**：C++（`c2/client/core`），**同一套源码出两种产物**：
-  - `RatAgent.exe`（控制台形态，`main.cpp`）：默认 beacon（HTTP 轮询 8080），`-tcp` 切长连接（4444）
-  - `RatAgent.dll`（`agent_dll.cpp` + `agent_runtime`）：rundll32 / 宿主 LoadLibrary / 注入，可优雅停止与卸载
+- **Agent**：C++（`c2/client/core`），**一套 core 编成多个模块产物**（名字 = `RatAgent.<module>.<形态>`）：
+  - `RatAgent.<module>.exe`（控制台形态，`main.cpp`）：默认 beacon（HTTP 轮询 8080），`-tcp` 切长连接（4444）
+  - `RatAgent.<module>.dll`（`agent_dll.cpp` + `agent_runtime`）：rundll32 / 宿主 LoadLibrary / 注入，可优雅停止与卸载
+  - 现有模块：`sys`（系统类）/ `screen`（远程桌面）/ `template`（工程模板）
 - **Server**：Go（`c2/server/cmd/c2server`），TCP 4444（ctl 信道）+ HTTP 8080（beacon）+ **TCP 4445（屏幕流中继）**
 - **CTL**：`ratctl`（Go 交互式 shell）+ `im_ctl`（ImGui 控制端）+ `viewer`（C++ Win32 远控查看器）
 
@@ -82,9 +83,9 @@ go test ./...
 
 # 2) Agent EXE + DLL（VS2022/18 MSBuild；输出到工作区 build/，避开既有 VS 目录 ACL）
 $msb = 'C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\amd64\MSBuild.exe'
-& $msb client\RatAgent.vcxproj -p:Configuration=Debug -p:Platform=x64 `
+& $msb client\RatAgent.sys.exe.vcxproj -p:Configuration=Debug -p:Platform=x64 `
   -p:IntDir=D:/code/projects/c2/build/agent/obj/ -p:OutDir=D:/code/projects/c2/build/agent/bin/
-& $msb client\RatAgentDll.vcxproj -p:Configuration=Debug -p:Platform=x64 `
+& $msb client\RatAgent.sys.vcxproj -p:Configuration=Debug -p:Platform=x64 `
   -p:IntDir=D:/code/projects/c2/build/dll/obj/ -p:OutDir=D:/code/projects/c2/build/dll/bin/
 
 # 3) viewer（CMake，独立工程）
@@ -93,10 +94,10 @@ cmake --build build/viewer --config Debug        # 产物 build/viewer/bin/viewe
 
 # 4) 运行联调（beacon 默认；-tcp 切长连接）
 .\build\bin\c2server.exe
-.\build\agent\bin\RatAgent.exe 127.0.0.1 8080 -s 5      # beacon
-.\build\agent\bin\RatAgent.exe 127.0.0.1 4444 -tcp      # TCP 长连接
-rundll32 .\build\dll\bin\RatAgent.dll,Start 127.0.0.1,8080,-s,5,id=.\build\dll\run\agent.id,log=.\build\dll\run\agent.log
-rundll32 .\build\dll\bin\RatAgent.dll,Stop  id=.\build\dll\run\agent.id,log=.\build\dll\run\agent.log
+.\build\agent\bin\RatAgent.sys.exe 127.0.0.1 8080 -s 5      # beacon
+.\build\agent\bin\RatAgent.sys.exe 127.0.0.1 4444 -tcp      # TCP 长连接
+rundll32 .\build\dll\bin\RatAgent.sys.dll,Start 127.0.0.1,8080,-s,5,id=.\build\dll\run\agent.id,log=.\build\dll\run\agent.log
+rundll32 .\build\dll\bin\RatAgent.sys.dll,Stop  id=.\build\dll\run\agent.id,log=.\build\dll\run\agent.log
 .\build\bin\ratctl.exe                           # 交互式：sessions → use <id> → ...
 ```
 
@@ -478,6 +479,30 @@ runpic 宿主自身输出仍在而 **agent 诊断行 0 条**、`%LOCALAPPDATA%\R
 - 解决方案构建出的 `RatAgent.screen.exe` 实测上线：`os="Windows (screen)" plugins=0x00000002`；
 - `client/x64/` 已被 `.gitignore` 覆盖，构建产物不会进仓库。
 
-**未做（等指示）**：工程文件名仍是 `RatAgent.vcxproj` / `RatAgentDll.vcxproj`。改名更自解释
-（如 `RatAgent.sys.exe.vcxproj` / `RatAgent.sys.vcxproj`），但会牵动文档与脚本，且此前整体回退过一次，
-故留待确认。
+**后续**：工程文件名与产物名的统一见 §9.7。
+
+### 9.7 工程文件名与产物名统一为 `RatAgent.<module>.<形态>`（✅ 完成）
+
+§9.6 遗留的"工程文件名不自解释"已解决：sys 模块的工程与产物都带上模块名，
+与 screen/template 的命名完全一致（显示名 = 产物名 = 工程文件名去掉 `.vcxproj`）。
+
+| 旧 | 新 |
+|---|---|
+| `client/RatAgent.vcxproj` | `client/RatAgent.sys.exe.vcxproj`（EXE 形态） |
+| `client/RatAgentDll.vcxproj` | `client/RatAgent.sys.vcxproj`（DLL 形态） |
+| `RatAgent.exe` / `RatAgent.dll` | `RatAgent.sys.exe` / `RatAgent.sys.dll` |
+| `RatAgent.exe.pdb` / `RatAgent.dll.pdb` | `RatAgent.sys.exe.pdb` / `RatAgent.sys.dll.pdb` |
+| `RatAgent.lib`（DLL 导入库） | `RatAgent.sys.lib` |
+
+**关键注意点**：工程文件名决定 MSBuild 的默认 `TargetName`。改成 `RatAgent.sys.exe.vcxproj` 后
+默认会产出 `RatAgent.sys.exe.exe`，所以**必须显式写 `<TargetName>RatAgent.sys</TargetName>`**
+（EXE 工程原先没有这个属性，DLL 工程原有的两处 `RatAgent` 也一并改为 `RatAgent.sys`）。
+
+**同步范围**：`agents.sln`（工程路径 + 显示名 `RatAgent.sys (exe)` / `RatAgent.sys (dll)`）、
+README、DESIGN、`client/core/agent_debug.h` 的构建示例、`agent_dll.cpp` / `main.cpp` 的文件头注释
+（改成通用的 `RatAgent.<module>.dll` / `.exe`，因为它们被所有模块共用）、验收脚本
+（`e2e_rdll` / `e2e_screen` / `e2e_modules`，以及早期的 `e2e_m1~m4`）。
+
+> §8.x 与 §9.1–§9.3 的**实测记录**里出现的 `RatAgent.exe` / `RatAgent.dll` 是改名前的产物名，
+> 与今天的 `RatAgent.sys.exe` / `RatAgent.sys.dll` 是同一个产物。
+> （`e2e_m1~m4` 是早期脚本，除产物名外，其余路径仍是旧的 `bin/`、`client/x64/Debug/` 布局。）

