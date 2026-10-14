@@ -514,25 +514,32 @@ README、DESIGN、`client/core/agent_debug.h` 的构建示例、`agent_dll.cpp` 
 
 **改动**
 
-1. 6 个 `.vcxproj` 全部加入**按来源分组**的过滤器（VS 里就是两个文件夹）：
+1. 6 个工程加入**按来源分组**的过滤器（VS 里就是两个文件夹）：
 
    | 分组 | 含义 |
    |---|---|
    | `core (shared)` | 共享内核：同一个 `client/core` 被**每个模块**编译进去（改它 = 改所有模块） |
    | `module (sys)` / `module (screen)` / `module (template)` | 只有本模块才有的文件 |
 
-   每个 `ClCompile`/`ClInclude` 都挂了 `<Filter>`；screen/template 工程顺带补齐了自有头文件条目
-   （原先只有 .cpp，头文件在 VS 里看不到）。
+   分组定义写在 **`<工程名>.vcxproj.filters`**（6 个新文件），每个 `ClCompile`/`ClInclude` 都挂了
+   对应 `<Filter>`；screen/template 工程顺带补齐了自有头文件条目（原先只有 .cpp，头文件在 VS 里看不到）。
 2. 修掉 **4 个陈旧引用**：sys 的两个工程里还列着 `core\screen_stream.h`、`core\screen_spy.h`、
    `core\desktop_switch.h`、`core\input_replay.h` —— 这些头文件在阶段 2 已搬到 `client/agents/screen/`。
 3. 新增 **`scripts/check_projects.py`**（静态自检，不构建）：
-   ① 每个 vcxproj 的 XML 是否合法 ② 引用的文件是否都存在 ③ 每个文件是否都分组、分组是否都已声明
+   ① `.vcxproj` XML 是否合法 ② 引用的文件是否都存在 ③ 是否有 `.vcxproj.filters`、
+   工程里每个文件是否都挂了分组、分组是否都已声明、`.filters` 与 `.vcxproj` 是否同步（漏项/幽灵项）
    ④ 目录里有没有"游离文件"（写了文件却没进工程 ⇒ 漏编译）。
 
-**过程记录（踩坑）**：我最初用 `<!-- ---- 分节 ---- -->` 当注释分隔线，而 **XML 注释不允许包含 `--`**，
-6 个工程文件一度**全部非法**；是 `check_projects.py` 的 XML 校验当场抓出来的——这正是加这个脚本的理由。
+**过程记录（两个坑，都记下来免得重犯）**
+
+1. 我最初用 `<!-- ---- 分节 ---- -->` 当注释分隔线，而 **XML 注释不允许包含 `--`**，6 个工程文件
+   一度**全部非法**；被 `check_projects.py` 的 XML 校验当场抓出。
+2. **第一版把 `<Filter>` 写进了 `.vcxproj`——那是无效的**：VS 的 C++ 工程**只读
+   `<工程名>.vcxproj.filters`**（对照本机 VS 生成的工程确认过：它的 `.vcxproj` 里一个 `Filter`
+   都没有，过滤器全在 `.filters` 里）。所以第一版改完，用户在 VS 里看到的**仍然是平铺**。
+   现已改为：`.vcxproj` 保持干净的编译清单，分组全部放进 `.filters`。
 
 **实测**
-- `python scripts/check_projects.py` → **ALL PASS**（6 工程 × 4 项检查 + 3 个目录无游离文件）；
-- `MSBuild client\agents.sln -p:Configuration=Release -p:Platform=x64` → **exit=0**（6 工程全部产出）；
-- 五个验收套件（`e2e_modules` / `e2e_template` / `e2e_screen` / `e2e_rdll` / `e2e_quiet`）全绿。
+- `python scripts/check_projects.py` → **ALL PASS**（6 工程 × 5 项 + 
+  `.filters` 同步性 + 3 个目录无游离文件）；
+- `MSBuild client\agents.sln -p:Configuration=Release -p:Platform=x64` → **exit=0**（6 工程全部产出）。

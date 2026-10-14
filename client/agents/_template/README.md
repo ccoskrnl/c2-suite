@@ -25,11 +25,27 @@
 | `core (shared)` | **共享内核**：同一个 `client/core` 被**每个模块**编译进去。改它 = 改所有模块，所以必须保持能力无关（见 `core/capability.h`） | `core\agent_runtime.cpp`、`core\capability.cpp` |
 | `module (<你的模块名>)` | **只有本模块有的文件**：你新增的能力都放这里 | `caps.cpp`、`screen_spy.cpp` |
 
-复制模板开新模块时，**记得把 `module (template)` 这个名字和每个条目里的 `<Filter>` 值改成你的模块名**。
-新加的 `.cpp`/`.h` 要做两件事：写进 `.vcxproj` 的 `ClCompile`/`ClInclude`，并挂到 `module (<module>)` 下。
+（分组定义在 `<工程名>.vcxproj.filters`，见下。）
 
-**自检**：`python scripts/check_projects.py` 会检查"引用的文件是否都存在 / 每个文件是否都分组了 /
-目录里有没有漏进工程的游离文件"。改名或搬文件后跑一下，比在 VS 里肉眼找快得多。
+复制模板开新模块时：改两个工程里的 `RatAgentModuleId`，并把 `<工程名>.vcxproj.filters` 里
+`module (template)` 这个名字一并改掉。两个文件分工不同：
+
+| 文件 | 作用 | 谁读 |
+|---|---|---|
+| `<工程名>.vcxproj` | **编译什么**（源文件清单、宏、链接库） | MSBuild / VS 构建 |
+| `<工程名>.vcxproj.filters` | **VS 里怎么分组显示**（文件夹） | 只有 VS 的界面 |
+
+新加的 `.cpp`/`.h` 要做**两件事**（只做第一件，VS 里它会跑到项目根目录，看不出属于谁）：
+
+1. 写进 `.vcxproj` 的 `ClCompile`/`ClInclude`（否则**不参与编译**）；
+2. 在 `<工程名>.vcxproj.filters` 里挂上分组 `module (<module>)`。
+
+> ⚠ **VS 的 C++ 过滤器只读 `.vcxproj.filters`**：把 `<Filter>` 写进 `.vcxproj` 是无效的
+> （工程照样能编，但界面里依然平铺）。
+
+**自检**：`python scripts/check_projects.py` 会检查"引用的文件是否都存在 / 每个文件是否都在
+`.filters` 里挂了分组 / `.filters` 与 `.vcxproj` 是否同步（有无漏项或幽灵项）"。改名或搬文件后跑一下，
+比在 VS 里肉眼找快得多。
 
 ## 构建
 

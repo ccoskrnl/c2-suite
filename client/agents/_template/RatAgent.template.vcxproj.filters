@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- 本文件只给 VS 看（工程内的分组/文件夹），构建不读它。
+       新增文件时：既写进 .vcxproj 的 ClCompile/ClInclude，也在这里挂上对应 <Filter> -->
+  <ItemGroup>
+    <Filter Include="core (shared)">
+      <UniqueIdentifier>{6F1B2A10-0001-4C3D-9E01-000000000001}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx;h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="module (template)">
+      <UniqueIdentifier>{6F3A1C10-0004-4B2E-9C31-000000000004}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx;h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="caps.cpp">
+      <Filter>module (template)</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\core\agent_dll.cpp">
+      <Filter>core (shared)</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\core\agent_runtime.cpp">
+      <Filter>core (shared)</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\core\capability.cpp">
+      <Filter>core (shared)</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\core\protocol.cpp">
+      <Filter>core (shared)</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\core\crypto.cpp">
+      <Filter>core (shared)</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\core\net.cpp">
+      <Filter>core (shared)</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\core\session.cpp">
+      <Filter>core (shared)</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\core\cmd_dispatch.cpp">
+      <Filter>core (shared)</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\core\beacon.cpp">
+      <Filter>core (shared)</Filter>
+    </ClCompile>
+    <ClInclude Include="..\..\core\capability.h">
+      <Filter>core (shared)</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\core\module_id.h">
+      <Filter>core (shared)</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\core\agent_debug.h">
+      <Filter>core (shared)</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\core\agent_runtime.h">
+      <Filter>core (shared)</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\core\protocol.h">
+      <Filter>core (shared)</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\core\crypto.h">
+      <Filter>core (shared)</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\core\net.h">
+      <Filter>core (shared)</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\core\session.h">
+      <Filter>core (shared)</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\core\cmd_dispatch.h">
+      <Filter>core (shared)</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\core\beacon.h">
+      <Filter>core (shared)</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

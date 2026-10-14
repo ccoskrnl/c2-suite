@@ -112,85 +112,29 @@
       <AdditionalDependencies>ws2_32.lib;bcrypt.lib;winhttp.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
-  <!-- ================================================================================
-       文件按"来源"分两个过滤器（VS 里就是两个文件夹，不再是平铺的一堆）：
-         · core (shared) = 共享内核：同一个 client/core 被**每个模块**编译进去，
-                           所以改它 = 改所有模块，必须保持能力无关（见 core/capability.h）
-         · module (template) = 只有本模块才有的文件
-       复制本工程开新模块时：把 Filter 名里的 template 换成你的模块名，
-       新加的 .cpp/.h 请挂到 module (<module>) 下。
-       ================================================================================ -->
+  <!-- 文件按来源分组（core (shared) = 被所有模块编译的共享内核 / module (<模块名>) = 本模块自有文件）。
+       分组定义在 <工程名>.vcxproj.filters —— VS 的 C++ 过滤器只读那个文件。 -->
   <ItemGroup>
-    <Filter Include="core (shared)">
-      <UniqueIdentifier>{6F1B2A10-0001-4C3D-9E01-000000000001}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="module (template)">
-      <UniqueIdentifier>{6F1B2A10-0004-4C3D-9E01-000000000004}</UniqueIdentifier>
-    </Filter>
-  </ItemGroup>
-  <ItemGroup>
-    <!-- ［本模块自有］ -->
-    <ClCompile Include="caps.cpp">
-      <Filter>module (template)</Filter>
-    </ClCompile>
-    <!-- ［共享内核］DLL 外壳 + 运行核心 + 通信 + 内置系统类指令（不要复制，直接引用） -->
-    <ClCompile Include="..\..\core\agent_dll.cpp">
-      <Filter>core (shared)</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\core\agent_runtime.cpp">
-      <Filter>core (shared)</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\core\capability.cpp">
-      <Filter>core (shared)</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\core\protocol.cpp">
-      <Filter>core (shared)</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\core\crypto.cpp">
-      <Filter>core (shared)</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\core\net.cpp">
-      <Filter>core (shared)</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\core\session.cpp">
-      <Filter>core (shared)</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\core\cmd_dispatch.cpp">
-      <Filter>core (shared)</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\core\beacon.cpp">
-      <Filter>core (shared)</Filter>
-    </ClCompile>
-    <ClInclude Include="..\..\core\capability.h">
-      <Filter>core (shared)</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\core\module_id.h">
-      <Filter>core (shared)</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\core\agent_debug.h">
-      <Filter>core (shared)</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\core\agent_runtime.h">
-      <Filter>core (shared)</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\core\protocol.h">
-      <Filter>core (shared)</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\core\crypto.h">
-      <Filter>core (shared)</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\core\net.h">
-      <Filter>core (shared)</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\core\session.h">
-      <Filter>core (shared)</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\core\cmd_dispatch.h">
-      <Filter>core (shared)</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\core\beacon.h">
-      <Filter>core (shared)</Filter>
-    </ClInclude>
+    <ClCompile Include="caps.cpp" />
+    <ClCompile Include="..\..\core\agent_dll.cpp" />
+    <ClCompile Include="..\..\core\agent_runtime.cpp" />
+    <ClCompile Include="..\..\core\capability.cpp" />
+    <ClCompile Include="..\..\core\protocol.cpp" />
+    <ClCompile Include="..\..\core\crypto.cpp" />
+    <ClCompile Include="..\..\core\net.cpp" />
+    <ClCompile Include="..\..\core\session.cpp" />
+    <ClCompile Include="..\..\core\cmd_dispatch.cpp" />
+    <ClCompile Include="..\..\core\beacon.cpp" />
+    <ClInclude Include="..\..\core\capability.h" />
+    <ClInclude Include="..\..\core\module_id.h" />
+    <ClInclude Include="..\..\core\agent_debug.h" />
+    <ClInclude Include="..\..\core\agent_runtime.h" />
+    <ClInclude Include="..\..\core\protocol.h" />
+    <ClInclude Include="..\..\core\crypto.h" />
+    <ClInclude Include="..\..\core\net.h" />
+    <ClInclude Include="..\..\core\session.h" />
+    <ClInclude Include="..\..\core\cmd_dispatch.h" />
+    <ClInclude Include="..\..\core\beacon.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
