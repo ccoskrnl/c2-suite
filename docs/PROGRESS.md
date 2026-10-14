@@ -506,3 +506,33 @@ README、DESIGN、`client/core/agent_debug.h` 的构建示例、`agent_dll.cpp` 
 > §8.x 与 §9.1–§9.3 的**实测记录**里出现的 `RatAgent.exe` / `RatAgent.dll` 是改名前的产物名，
 > 与今天的 `RatAgent.sys.exe` / `RatAgent.sys.dll` 是同一个产物。
 > （`e2e_m1~m4` 是早期脚本，除产物名外，其余路径仍是旧的 `bin/`、`client/x64/Debug/` 布局。）
+
+### 9.8 工程内文件分组（过滤器）+ 工程结构自检（✅ 完成）
+
+**起因**（用户反馈）：在 VS 里打开 `RatAgent.sys` 工程时所有文件**平铺**在一起——
+`..\..\core\*.cpp`（共享内核）和模块自己的文件分不清来源，也看不出哪些是后加的。
+
+**改动**
+
+1. 6 个 `.vcxproj` 全部加入**按来源分组**的过滤器（VS 里就是两个文件夹）：
+
+   | 分组 | 含义 |
+   |---|---|
+   | `core (shared)` | 共享内核：同一个 `client/core` 被**每个模块**编译进去（改它 = 改所有模块） |
+   | `module (sys)` / `module (screen)` / `module (template)` | 只有本模块才有的文件 |
+
+   每个 `ClCompile`/`ClInclude` 都挂了 `<Filter>`；screen/template 工程顺带补齐了自有头文件条目
+   （原先只有 .cpp，头文件在 VS 里看不到）。
+2. 修掉 **4 个陈旧引用**：sys 的两个工程里还列着 `core\screen_stream.h`、`core\screen_spy.h`、
+   `core\desktop_switch.h`、`core\input_replay.h` —— 这些头文件在阶段 2 已搬到 `client/agents/screen/`。
+3. 新增 **`scripts/check_projects.py`**（静态自检，不构建）：
+   ① 每个 vcxproj 的 XML 是否合法 ② 引用的文件是否都存在 ③ 每个文件是否都分组、分组是否都已声明
+   ④ 目录里有没有"游离文件"（写了文件却没进工程 ⇒ 漏编译）。
+
+**过程记录（踩坑）**：我最初用 `<!-- ---- 分节 ---- -->` 当注释分隔线，而 **XML 注释不允许包含 `--`**，
+6 个工程文件一度**全部非法**；是 `check_projects.py` 的 XML 校验当场抓出来的——这正是加这个脚本的理由。
+
+**实测**
+- `python scripts/check_projects.py` → **ALL PASS**（6 工程 × 4 项检查 + 3 个目录无游离文件）；
+- `MSBuild client\agents.sln -p:Configuration=Release -p:Platform=x64` → **exit=0**（6 工程全部产出）；
+- 五个验收套件（`e2e_modules` / `e2e_template` / `e2e_screen` / `e2e_rdll` / `e2e_quiet`）全绿。

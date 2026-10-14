@@ -45,11 +45,16 @@ c2/
 ├── im_ctl/                    # C++ ImGui 控制端
 ├── tools/runpic/              # PIC blob 执行器（反射加载验证 harness，配合外部 loader）
 └── scripts/                   # e2e_m1~m4 + e2e_rdll/e2e_quiet/e2e_modules/e2e_screen/e2e_template
+                               # + check_projects.py（工程结构自检：引用存在性/分组/漏项）
 ```
 
 > **解决方案结构**（在 VS 里看到的树）：`core (shared)` 放共享内核的入口文件（它没有独立工程，
 > 被编进每个模块）、`docs` 放文档、然后每个模块一个文件夹（`sys` / `screen` / `template`），
 > 每个文件夹里是同一模块的 **EXE 形态** + **DLL 形态**两个工程。
+>
+> 打开某个模块工程后，文件也是按**来源**分两组（不是平铺）：`core (shared)` = 被所有模块编译的
+> 共享内核、`module (<模块名>)` = 本模块自有文件。改名/搬文件之后可以跑
+> `python scripts/check_projects.py` 自检（引用是否存在、文件是否都分组、有没有漏进工程的游离文件）。
 
 ## 构建
 
@@ -251,7 +256,8 @@ payload <file> [name] [--args <参数>] 上传二进制 payload 并执行
 4. 自动验收：`python scripts/e2e_m3.py`（beacon + ratctl）、`python scripts/e2e_m4.py`（屏幕流）、
    `python scripts/e2e_rdll.py`（反射加载：需先有 `build/e2e/out.bin`，见 `docs/PROGRESS.md` §8.5）、
    `python scripts/e2e_quiet.py`（静默构建）、`python scripts/e2e_modules.py`（模块命名空间共存）、
-   `python scripts/e2e_template.py`（模块模板）、`python scripts/e2e_screen.py`（远程桌面模块，阶段 2）
+   `python scripts/e2e_template.py`（模块模板）、`python scripts/e2e_screen.py`（远程桌面模块，阶段 2）、
+   `python scripts/check_projects.py`（工程结构自检：引用是否存在、文件是否分组、有无漏项）
 
 ## 协议要点
 

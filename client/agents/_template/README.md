@@ -15,6 +15,22 @@
 5. **不要动 `client/core`** —— 如果你发现"必须改 core 才能加这个能力"，说明边界没切干净，
    应当先修边界（见 `core/capability.h` 的说明）。这条是模块化是否成立的判据。
 
+## 工程里的文件分组（VS 里看到的两个文件夹）
+
+每个工程的文件按**来源**分成两个过滤器，VS 里就是两个文件夹（不再是平铺一堆，一眼能看出
+哪些是共享的、哪些是本模块的）：
+
+| 分组 | 含义 | 例 |
+|---|---|---|
+| `core (shared)` | **共享内核**：同一个 `client/core` 被**每个模块**编译进去。改它 = 改所有模块，所以必须保持能力无关（见 `core/capability.h`） | `core\agent_runtime.cpp`、`core\capability.cpp` |
+| `module (<你的模块名>)` | **只有本模块有的文件**：你新增的能力都放这里 | `caps.cpp`、`screen_spy.cpp` |
+
+复制模板开新模块时，**记得把 `module (template)` 这个名字和每个条目里的 `<Filter>` 值改成你的模块名**。
+新加的 `.cpp`/`.h` 要做两件事：写进 `.vcxproj` 的 `ClCompile`/`ClInclude`，并挂到 `module (<module>)` 下。
+
+**自检**：`python scripts/check_projects.py` 会检查"引用的文件是否都存在 / 每个文件是否都分组了 /
+目录里有没有漏进工程的游离文件"。改名或搬文件后跑一下，比在 VS 里肉眼找快得多。
+
 ## 构建
 
 ```powershell
