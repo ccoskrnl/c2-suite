@@ -4,18 +4,35 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 # ============================================================================
 # 这个解决方案 = 多个"模块 agent"。每个模块是**独立进程、直连 C2**：
-#   · core 是共享内核（没有独立工程，被编进每个模块）——见下面的 "core (shared)" 文件夹
+#   · core 是共享内核，**没有独立工程**：它的 .cpp 被每个模块工程直接编译进去
+#     （见各 .vcxproj 里 `..\..\core\*.cpp` 的 ClCompile 项）。
+#     下面的 "core (shared)" 是解决方案项文件夹，把内核文件全列出来便于浏览；
+#     改 core = 改所有模块，所以它必须保持能力无关（见 core/capability.h）。
 #   · 每个模块一个文件夹，内含两个工程：EXE 形态（独立部署/调试）+ DLL 形态（注入/反射加载）
 #   · 新增模块：复制 agents\_template\ 到 agents\<module>\，见其中的 README.md
 # ============================================================================
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "core (shared)", "core (shared)", "{7E3A1C10-2004-4B2E-9C31-000000002004}"
 	ProjectSection(SolutionItems) = preProject
 		core\capability.h = core\capability.h
+		core\capability.cpp = core\capability.cpp
 		core\module_id.h = core\module_id.h
 		core\agent_debug.h = core\agent_debug.h
 		core\agent_runtime.h = core\agent_runtime.h
+		core\agent_runtime.cpp = core\agent_runtime.cpp
 		core\agent_dll.cpp = core\agent_dll.cpp
-		core\agent_main.cpp = core\agent_main.cpp
+		core\main.cpp = core\main.cpp
+		core\protocol.h = core\protocol.h
+		core\protocol.cpp = core\protocol.cpp
+		core\crypto.h = core\crypto.h
+		core\crypto.cpp = core\crypto.cpp
+		core\net.h = core\net.h
+		core\net.cpp = core\net.cpp
+		core\session.h = core\session.h
+		core\session.cpp = core\session.cpp
+		core\beacon.h = core\beacon.h
+		core\beacon.cpp = core\beacon.cpp
+		core\cmd_dispatch.h = core\cmd_dispatch.h
+		core\cmd_dispatch.cpp = core\cmd_dispatch.cpp
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{7E3A1C10-2005-4B2E-9C31-000000002005}"
