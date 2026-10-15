@@ -174,9 +174,9 @@ screenshot [id] <file> / screen [id] [fps] [quality] [scale] / stop / payload <f
 | # | 位置 | 问题 | 修复 |
 |---|---|---|---|
 | 1 | `im_ctl/ctl_client.cpp` | seq 在发送锁外分配 → 并发发送时 seq 与落网顺序不一致，被 C2 防重放丢包；读线程 `h.seq <= lastSeq_` 单调闸门会永久吞掉"晚到的较早响应" | `sendRaw` 改为在发送锁内分配 seq；`sendAndWait` 的"分配 seq + 登记 pending + 发送"合并到同一锁；读线程改为**先按 seq 找等待者投递**，仅对无人认领的包走防重放闸门 |
-| 2 | `client/core/screen_stream.cpp` | `fps/quality` 形参完全不生效（帧间隔硬编码 25fps、JPEG 质量硬编码 70；`encode_jpeg_bgra` 从不设置 WIC 质量属性 → 截屏 0x1001 的 75 也无效）；输入轮询的 50ms 阻塞还挤占帧节奏 | 帧节奏改为**基于 `next_frame` 的时间片**；JPEG 质量经属性包在 `frame->Initialize` 之前写入；`fps/quality/scale` 全部生效 |
-| 3 | `client/core/screen_stream.cpp` | 先置 `g_running=true` 再建线程（失败则永久"已在运行"）；线程自行退出不清标志（断开后无法重启）；stop 等 5s 超时仍关句柄置空 → 可能并存两条流线程 | 新增 `g_thread_alive` + `ThreadGuard`（任何退出路径都清标志）；start 先占位、建线程失败回滚；stop 超时**保留句柄**，由 `reap_finished_thread()` 在线程退出后回收 |
-| 4 | `client/core/screen_stream.cpp` | 50ms 轮询直接读包，超时丢半包 → 字节流错位、输入事件静默丢失 | 新增 `InputStream`：**自持重装缓冲** + `select` 短等待，只从缓冲切完整包，半包留待下次 |
+| 2 | `client/agents/screen/screen_stream.cpp` | `fps/quality` 形参完全不生效（帧间隔硬编码 25fps、JPEG 质量硬编码 70；`encode_jpeg_bgra` 从不设置 WIC 质量属性 → 截屏 0x1001 的 75 也无效）；输入轮询的 50ms 阻塞还挤占帧节奏 | 帧节奏改为**基于 `next_frame` 的时间片**；JPEG 质量经属性包在 `frame->Initialize` 之前写入；`fps/quality/scale` 全部生效 |
+| 3 | `client/agents/screen/screen_stream.cpp` | 先置 `g_running=true` 再建线程（失败则永久"已在运行"）；线程自行退出不清标志（断开后无法重启）；stop 等 5s 超时仍关句柄置空 → 可能并存两条流线程 | 新增 `g_thread_alive` + `ThreadGuard`（任何退出路径都清标志）；start 先占位、建线程失败回滚；stop 超时**保留句柄**，由 `reap_finished_thread()` 在线程退出后回收 |
+| 4 | `client/agents/screen/screen_stream.cpp` | 50ms 轮询直接读包，超时丢半包 → 字节流错位、输入事件静默丢失 | 新增 `InputStream`：**自持重装缓冲** + `select` 短等待，只从缓冲切完整包，半包留待下次 |
 | 5 | `client/core/main.cpp`、`beacon.cpp` | 未知指令两信道行为不一致（长连接不回包 → ctl 空等 240s 超时；beacon 回 status=1） | 长连接也回 `CMD_RESULT(status=1)`，与 beacon 及协议 §2 一致 |
 | 6 | `server/cmd/c2server/main.go` | HELLO_ACK 的 `server_time` 用 BigEndian，与"统一小端"文档冲突 | 改 LittleEndian（无解析方，行为无影响） |
 | 7 | `server/cmd/c2server/beacon.go` | **验证中新发现**：`decodeResults` 对零长度结果调用 `r.Read(空切片)`，`bytes.Reader` 在缓冲区末尾返回 `io.EOF` → 整个结果块解码失败，Agent 反复 `POST failed`（任何"status 非 0 且结果为空"的结果都会触发，未知指令即此类） | `ln > 0` 才读结果，并改用 `io.ReadFull`（避免短读静默截断） |
@@ -368,8 +368,8 @@ runpic 宿主自身输出仍在而 **agent 诊断行 0 条**、`%LOCALAPPDATA%\R
 | 文件 | 作用 |
 |---|---|
 | [core/capability.h](../client/core/capability.h) / `.cpp` | 注册表：**指令处理器表** + **配置钩子**；`cap_ensure_registered()` / `cap_dispatch()` / `cap_notify_config()` |
-| [core/screen_module.h](../client/core/screen_module.h) / `.cpp` | 原长在 core 里的屏幕能力：`0x1001` 截屏、`0x1002` 屏幕流、配置钩子（**阶段 2 整体搬走**） |
-| [client/caps_full.cpp](../client/caps_full.cpp) | 工程级能力清单：`register_module_capabilities()` —— **加/减能力只改这里** |
+| [core/screen_module.h](../client/agents/screen/screen_module.h) / `.cpp` | 原长在 core 里的屏幕能力：`0x1001` 截屏、`0x1002` 屏幕流、配置钩子（**阶段 2 整体搬走**，现位于 `client/agents/screen/`） |
+| [client/caps_sys.cpp](../client/caps_sys.cpp) | 工程级能力清单：`register_module_capabilities()` —— **加/减能力只改这里**（阶段 1 时叫 `caps_full.cpp`，§9.5 改名） |
 | [client/agents/_template/](../client/agents/_template/) | 模块工程模板（DLL + EXE 两个工程 + `caps.cpp` + README） |
 
 具体动作：
@@ -578,3 +578,19 @@ README、DESIGN、`client/core/agent_debug.h` 的构建示例、`agent_dll.cpp` 
 **顺带说明（本次未改）**：触发器文件里的参数**解析失败**时（例如 `-tpcc` 拼错），
 `start_from_args` 返回 0、自启动**静默不启动**（只在日志留一行 `bad args`）。这是
 "宁可不上线，也不带着错误配置上线"的取舍；若要改成"退回默认配置并告警"，是几行的事。
+
+### 9.10 开发说明文档 + 默认能力位修正（✅ 完成）
+
+**新增 [docs/DEVELOPMENT.md](DEVELOPMENT.md)**：把"怎么开发"从对话/代码注释沉淀成正式文档——
+三层模型（core / 模块 / 能力注册表）、文件地图（什么该放哪、改动影响面）、开新模块六步、
+能力的完整示例（含 `status` 码用法）、契约与硬约束（同步、不阻塞、线程收敛、不抛异常、
+不依赖 CWD）、四类典型能力的做法、调试手段、**"什么时候该改 core"的判据**、提交前清单、
+12 条常见陷阱（全部来自本项目实际踩过的）。
+
+**顺带修正一处不一致**：`core/module_id.h` 里 `RAT_MODULE_CAPS` 的**兜底默认值**仍是
+`(kCapSys | kCapRemote)`（"全量 agent"时代的遗留），与"默认模块 `sys` 只有系统类能力"矛盾——
+若某个构建忘了定义它，能力位会**凭空多出"远程桌面"**。已改为 `(c2::kCapSys)` 并补注释说明
+（各模块工程的 `.vcxproj` 本来就显式定义该值，所以这是文档/兜底语义修正，不影响现有产物行为）。
+
+**实测**：`check_projects.py` ALL PASS；六个模块产物重建成功；
+五个 e2e 套件全绿（`e2e_modules` / `e2e_screen` / `e2e_template` / `e2e_rdll` / `e2e_quiet`）。

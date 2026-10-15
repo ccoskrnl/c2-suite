@@ -142,7 +142,7 @@
 | `main.go` | 监听 4444；握手（doHandshake/parseHello）；agentLoop/ctlLoop；`RelayMap`（业务结果回传）；业务指令按 agent 模式分发（beacon 入队 / 长连接直发） |
 | `beacon.go` | HTTP 8080：GET 命令下发（伪装 HTML + token）、POST 结果接收、`BeaconQueue` 命令队列、beacon 会话注册 |
 | `beacon_stream.go` | TCP 4445：屏幕流握手（StreamKey）、`StreamRegistry` 配对、帧上行转换加密转发、输入下行 |
-| `internal/session` | 会话注册表（byID/byKey，RWMutex）、SweepLoop（TCP 30s 离线/60s 回收；beacon 180s/360s） |
+| `server/internal/session` | 会话注册表（byID/byKey，RWMutex）、SweepLoop（TCP 30s 离线/60s 回收；beacon 180s/360s） |
 
 ### 4.2 RatAgent（C++，`client/core`）
 

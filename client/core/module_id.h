@@ -37,10 +37,12 @@ constexpr const char* kModuleId = RAT_MODULE_ID;
 constexpr uint32_t kCapSys = 1u << 0;      // 系统类：sysinfo / exec / payload
 constexpr uint32_t kCapRemote = 1u << 1;   // 远程桌面：抓屏 / 屏幕流 / 输入回放
 
-// 本模块的能力位图。默认 = 全量 agent（系统类 + 远程桌面）；
-// 各模块工程用 RAT_MODULE_CAPS 覆盖，例如 -DRAT_MODULE_CAPS=(c2::kCapRemote)
+// 本模块的能力位图。各模块工程都用 RAT_MODULE_CAPS 覆盖（见各自的 vcxproj），
+// 例如 sys → (c2::kCapSys)、screen → (c2::kCapRemote)。
+// 兜底默认值与默认模块名一致（默认模块是 sys = 只有系统类能力）；
+// 若某个构建没有定义它，得到的能力位不会凭空多出"远程桌面"。
 #ifndef RAT_MODULE_CAPS
-#define RAT_MODULE_CAPS (c2::kCapSys | c2::kCapRemote)
+#define RAT_MODULE_CAPS (c2::kCapSys)
 #endif
 
 constexpr uint32_t kModuleCaps = (uint32_t)(RAT_MODULE_CAPS);

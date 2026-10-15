@@ -27,6 +27,7 @@
 - [构建](#构建)
 - [测试](#测试)
 - [使用](#使用)
+- [开发说明（加模块 / 加能力）→](docs/DEVELOPMENT.md)
 - [排错](#排错)
 - [协议要点](#协议要点)
 - [路线图](#路线图)
@@ -38,6 +39,7 @@
 ```
 c2-suite/
 ├── docs/protocol.md           # 协议规范 v1（两端唯一契约；§10 为 payload 上传）
+├── docs/DEVELOPMENT.md        # **开发说明**：加模块/加能力/边界判断/常见陷阱
 ├── docs/DESIGN.md             # 设计说明（含手动映射契约、注入取舍）
 ├── docs/PROGRESS.md           # 进度与实测记录（§8 历史、§9 模块化）
 ├── internal/protocol/         # Go 共享协议层（头编解码 + AES-GCM/HKDF + 向量单测）
@@ -66,7 +68,8 @@ c2-suite/
 ├── im_ctl/                    # C++ ImGui 控制端（第三方依赖不在仓库内，见构建章节）
 ├── tools/runpic/              # PIC blob 执行器（反射加载验证 harness）
 └── scripts/                   # 验收脚本（见"测试"章节）
-    ├── check_projects.py      # 工程结构自检（引用/分组/漏项）
+    ├── check_projects.py      # 工程结构自检（引用/分组/漏项/XML）
+    ├── check_docs.py          # 文档自检（本地链接、反引号路径是否有效）
     ├── e2e_modules.py         # 模块命名空间共存（sys + probe）
     ├── e2e_screen.py          # 远程桌面模块（截屏/流/停流/sys 无屏幕指令）
     ├── e2e_template.py        # 模块模板（自定义指令 + core 指令）
@@ -106,6 +109,9 @@ go build -o build/bin/ratctl.exe   ./ctl/cmd/ratctl
 
 > 想跑**远程桌面**（截屏 / 屏幕流）：还需要编 `screen` 模块（见 [构建](#构建)），
 > 然后在 ratctl 里 `use screen` → `screenshot <file>` / `screen`。
+
+> 要**加一个新模块 / 新能力**？看 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
+> （模板复制 → 工程四处改动 → 登记指令 → 验收，含契约与踩坑清单）。
 
 ---
 
@@ -293,14 +299,19 @@ scp kali@<vm>:/home/kali/opts/tcg/RfUdrl/sys-quiet.bin  build/e2e/out_quiet.bin
 ### 0. 静态自检（不构建，最快）
 
 ```powershell
-python scripts/check_projects.py
+python scripts/check_projects.py    # 工程结构
+python scripts/check_docs.py        # 文档链接
 ```
 
-检查 6 个 `.vcxproj`：① XML 合法 ② 引用的文件是否都存在 ③ 是否有 `<工程名>.vcxproj.filters`
-（**VS 的 C++ 过滤器只读这个文件**）④ 工程里每个文件是否都挂了分组、`.filters` 与 `.vcxproj`
-是否同步（漏项/幽灵项）⑤ 目录里有没有"游离源文件"（写了却没进工程 ⇒ 漏编译）。
+**`check_projects.py`** 检查 6 个 `.vcxproj`：① XML 合法 ② 引用的文件是否都存在
+③ 是否有 `<工程名>.vcxproj.filters`（**VS 的 C++ 过滤器只读这个文件**）④ 工程里每个文件是否都挂了
+分组、`.filters` 与 `.vcxproj` 是否同步（漏项/幽灵项）⑤ 目录里有没有"游离源文件"
+（写了却没进工程 ⇒ 漏编译）。
 
-> 改名/搬文件/加文件之后先跑它，比在 VS 里肉眼找快得多。
+**`check_docs.py`** 检查 README 与 `docs/*.md`：① 本地 Markdown 链接是否有效
+② 反引号里引用的仓库路径是否存在（生成目录/第三方依赖/历史改名对照有显式豁免清单）。
+
+> 改名/搬文件/加文件之后先跑这两个，比在 VS 里或浏览器里肉眼找快得多。
 
 ### 1. 端到端套件
 
@@ -328,7 +339,7 @@ python scripts/e2e_quiet.py
 
 ```powershell
 $env:PYTHONIOENCODING = 'utf-8'      # 让中文断言在控制台正确显示
-foreach ($s in 'check_projects','e2e_modules','e2e_screen','e2e_template','e2e_rdll','e2e_quiet') {
+foreach ($s in 'check_projects','check_docs','e2e_modules','e2e_screen','e2e_template','e2e_rdll','e2e_quiet') {
   $r = python "scripts/$s.py" 2>&1 | Select-Object -Last 1
   "{0,-16} {1}" -f $s, ($r -replace '[^\x20-\x7e]','')
 }
@@ -343,10 +354,10 @@ foreach ($s in 'check_projects','e2e_modules','e2e_screen','e2e_template','e2e_r
 
 ### 4. 提交前回归清单
 
-1. `python scripts/check_projects.py`
+1. `python scripts/check_projects.py` + `python scripts/check_docs.py`
 2. 重建 `build/` 布局的全部产物（§3）+ 重链 PIC（§5）
 3. 五个 e2e 全绿
-4. 动过 `client/core` 的公共契约（命名空间/能力注册表/自启动）时，同步 README / DESIGN / PROGRESS
+4. 动过 `client/core` 的公共契约（命名空间/能力注册表/自启动）时，同步 README / DESIGN / PROGRESS / DEVELOPMENT
 
 > **早期脚本** `e2e_m1~m4.py` 是模块化改造**之前**的验收（beacon 交互、屏幕流、M1/M2 里程碑），
 > 里面的路径还是旧的 `bin/`、`client/x64/Debug/` 布局，已不随当前结构维护；

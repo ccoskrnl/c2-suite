@@ -300,7 +300,7 @@ count   u32   结果条数
 
 ## 7. 测试向量（两端交叉验证）
 
-> 生成：见 `server/internal/protocol/testdata`（Go 生成，固定输入）。
+> 生成：见 `internal/protocol/testdata`（Go 生成，固定输入）。
 > 两端对同一向量必须产生相同结果：`crypto_test.go`（Go）与 `protocol_test.cpp`（C++）共用。
 
 （M1 生成后填充：固定 PSK / client_nonce / server_nonce → session_key；固定 key/nonce/明文 → 密文。）
