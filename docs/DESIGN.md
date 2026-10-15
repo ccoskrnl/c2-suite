@@ -184,6 +184,7 @@ DLL 侧关键设计（三处踩坑点）：
    （`0xC0000409`/`__fastfail`，实测连零依赖的探针导出也一样），但远程 `LoadLibraryW` 可用；
    因此采用**触发器自启动**：注入方先写 `%LOCALAPPDATA%\RatAgent\<module>.autostart.args`（或 `%TEMP%\RatAgent\<module>.autostart.args`），
    再远程 `LoadLibraryW`，`DllMain` 检测到触发器后交给 `_beginthreadex` 建的新线程去解析并启动。
+   触发器**内容必须非空**才算数：文件不存在或内容为空 → 一律走内置默认配置（beacon 127.0.0.1:8080）。
 
 **手动映射契约**：DLL 用静态 CRT（`/MT`，实测依赖项只有系统 DLL，无 VC 运行库）；
 映射方**必须先调用入口点**（`DllMainCRTStartup`，`DLL_PROCESS_ATTACH`）让 CRT 初始化；

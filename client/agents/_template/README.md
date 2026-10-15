@@ -89,4 +89,4 @@ ratctl> sysinfo                # core 内置指令应照常可用
 | C2 侧标签 | 握手 `os_info` = `Windows (<module>)`（仅 TCP 长连接可见；beacon 侧是已知缺口） |
 | 能力位 | 走 `plugins` 位图（`sessions` / `session <id>` 可见） |
 | 指令码 | 在**你自己的段**里挑：0x1xxx 远程控制 / 0x2xxx 文件 / 0x3xxx 系统；别占 core 内置的 0x3001/0x3008/0x3009 |
-| 停止 | 有 `autostart.args` 用文件参数，没有就用内置默认配置（加载即自启） |
+| 自启动/停止 | `autostart.args` **存在且内容非空** → 用文件参数；**不存在或内容为空** → 用内置默认配置（加载即自启） |

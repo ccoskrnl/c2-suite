@@ -140,9 +140,9 @@ rundll32 RatAgent.sys.dll,Stop  id=<module>.id 路径或 32 位 hex>
 LoadLibraryW(L"RatAgent.sys.dll") → StartAgent("127.0.0.1,8080,-s,5") → … → StopAgent()
 
 :: 3) 注入 / 反射加载（远程 LoadLibrary，或手动映射；这类场景没有参数通道）
-::    本 DLL **加载即自启**：有 %LOCALAPPDATA%\RatAgent\<module>.autostart.args（或 %TEMP% 下
-::    同名文件）就用文件里的参数串；**没有该文件则用内置默认配置**（beacon 127.0.0.1:8080、
-::    轮询 5s；<module>.id / 日志落 %LOCALAPPDATA%\RatAgent\）。
+::    本 DLL **加载即自启**：%LOCALAPPDATA%\RatAgent\<module>.autostart.args（或 %TEMP% 下同名文件）
+::    **存在且内容非空** → 用文件里的参数串；**文件不存在、或内容为空** → 一律用内置默认配置
+::    （beacon 127.0.0.1:8080、轮询 5s；<module>.id / 日志落 %LOCALAPPDATA%\RatAgent\）。
 ```
 
 ### 模块清单与拆分现状

